@@ -520,7 +520,10 @@ export default function App() {
       productionOrders,
       varieties,
       qualityAudits,
-      routineReminders
+      routineReminders,
+      productionLogs,
+      salaryAdvances,
+      companies
     };
     const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -531,21 +534,39 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  const handleImportBackup = (jsonStr: string) => {
+  const handleImportBackup = async (jsonStr: string) => {
     try {
       const data = JSON.parse(jsonStr);
-      if (data.customers) setCustomers(data.customers);
-      if (data.suppliers) setSuppliers(data.suppliers);
-      if (data.inventory) setInventory(data.inventory);
-      if (data.salesBills) setSalesBills(data.salesBills);
-      if (data.purchaseBills) setPurchaseBills(data.purchaseBills);
-      if (data.payments) setPayments(data.payments);
-      if (data.employees) setEmployees(data.employees);
-      if (data.productionOrders) setProductionOrders(data.productionOrders);
-      if (data.varieties) setVarieties(data.varieties);
-      if (data.qualityAudits) setQualityAudits(data.qualityAudits);
-      if (data.routineReminders) setRoutineReminders(data.routineReminders);
-      setToastMsg('System backup restored successfully!');
+      const restoredData: Array<[string, unknown, (value: any) => void]> = [
+        ['companySettings', data.settings, setSettings],
+        ['customers', data.customers, setCustomers],
+        ['suppliers', data.suppliers, setSuppliers],
+        ['inventory', data.inventory, setInventory],
+        ['salesBills', data.salesBills, setSalesBills],
+        ['purchaseBills', data.purchaseBills, setPurchaseBills],
+        ['payments', data.payments, setPayments],
+        ['employees', data.employees, setEmployees],
+        ['productionLogs', data.productionLogs, setProductionLogs],
+        ['salaryAdvances', data.salaryAdvances, setSalaryAdvances],
+        ['productionOrders', data.productionOrders, setProductionOrders],
+        ['varietyCatalog', data.varieties, setVarieties],
+        ['qualityAudits', data.qualityAudits, setQualityAudits],
+        ['routineReminders', data.routineReminders, setRoutineReminders]
+      ];
+
+      for (const [key, value, setValue] of restoredData) {
+        if (value !== undefined) {
+          setValue(value);
+          await storeSet(key, value);
+        }
+      }
+
+      if (data.companies !== undefined) {
+        setCompanies(data.companies);
+        await globalSet('companies', data.companies);
+      }
+
+      setToastMsg('Backup restored locally and queued for cloud sync.');
     } catch (e) {
       alert('Failed to import backup file. Please check JSON formatting.');
     }
