@@ -69,8 +69,50 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
           localStorage.setItem(scopedKey(key), JSON.stringify(data.payload));
         } catch {}
         return data.payload as T;
-      } else if (hasLocalData) {
-        // If Supabase has no record yet for this key, push Computer A's local storage data to Supabase!
+      }
+
+      // Relational Fallback for key: if app_state was empty, check relational tables!
+      if (key === 'inventory') {
+        const { data: invRows } = await client.from('inventory').select('*').eq('company_id', companyId);
+        if (invRows && invRows.length > 0) {
+          const mapped: InventoryItem[] = invRows.map((r: any) => ({
+            id: r.id,
+            name: r.name,
+            type: r.type,
+            unit: r.unit,
+            qty: Number(r.qty) || 0,
+            reorderLevel: Number(r.reorder_level) || 0
+          }));
+          try { localStorage.setItem(scopedKey(key), JSON.stringify(mapped)); } catch {}
+          return mapped as unknown as T;
+        }
+      } else if (key === 'salesBills') {
+        const { data: billRows } = await client.from('sales_bills').select('*').eq('company_id', companyId);
+        if (billRows && billRows.length > 0) {
+          const mapped: SalesBill[] = billRows.map((b: any) => ({
+            id: b.id,
+            billNo: b.bill_no,
+            date: b.date,
+            customerName: b.customer_name,
+            customerPhone: b.customer_phone,
+            customerGstin: b.customer_gstin,
+            customerAddress: b.customer_address,
+            customerState: b.customer_state,
+            subtotal: Number(b.subtotal) || 0,
+            cgst: Number(b.cgst) || 0,
+            sgst: Number(b.sgst) || 0,
+            igst: Number(b.igst) || 0,
+            grand: Number(b.grand_total) || 0,
+            status: b.status,
+            items: b.items || []
+          }));
+          try { localStorage.setItem(scopedKey(key), JSON.stringify(mapped)); } catch {}
+          return mapped as unknown as T;
+        }
+      }
+
+      if (hasLocalData) {
+        // If Supabase has no record yet for this key and no relational record, push Computer A's local storage data to Supabase
         await storeSet(key, localVal);
       }
     } catch (e) {}
@@ -94,7 +136,77 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
         payload: val,
         updated_at: new Date().toISOString()
       });
-    } catch (e) {}
+
+      // Also mirror to dedicated relational table if available
+      if (key === 'salesBills' && Array.isArray(val)) {
+        const rows = val.map((b: any) => ({
+          id: b.id || `sb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          company_id: companyId,
+          bill_no: b.billNo || 'VC-000',
+          date: b.date || new Date().toISOString().split('T')[0],
+          customer_name: b.customerName || 'Customer',
+          customer_phone: b.customerPhone || null,
+          customer_gstin: b.customerGstin || null,
+          customer_address: b.customerAddress || null,
+          customer_state: b.customerState || 'Tamil Nadu',
+          subtotal: b.subtotal || 0,
+          cgst: b.cgst || 0,
+          sgst: b.sgst || 0,
+          igst: b.igst || 0,
+          grand_total: b.grand || 0,
+          status: b.status || 'pending',
+          items: b.items || []
+        }));
+        await client.from('sales_bills').upsert(rows);
+      } else if (key === 'customers' && Array.isArray(val)) {
+        const rows = val.map((c: any) => ({
+          id: c.id || `cust_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          company_id: companyId,
+          name: c.name,
+          phone: c.phone || null,
+          gstin: c.gstin || null,
+          address: c.address || null,
+          state: c.state || 'Tamil Nadu',
+          pincode: c.pincode || null,
+          balance: 0
+        }));
+        await client.from('customers').upsert(rows);
+      } else if (key === 'suppliers' && Array.isArray(val)) {
+        const rows = val.map((s: any) => ({
+          id: s.id || `supp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          company_id: companyId,
+          name: s.name,
+          phone: s.phone || null,
+          gstin: s.gstin || null,
+          address: s.address || null,
+          balance: 0
+        }));
+        await client.from('suppliers').upsert(rows);
+      } else if (key === 'inventory' && Array.isArray(val)) {
+        const rows = val.map((item: any) => ({
+          id: item.id || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          company_id: companyId,
+          name: item.name,
+          type: item.type,
+          unit: item.unit,
+          qty: item.qty || 0,
+          reorder_level: item.reorderLevel || 0
+        }));
+        await client.from('inventory').upsert(rows);
+      } else if (key === 'employees' && Array.isArray(val)) {
+        const rows = val.map((e: any) => ({
+          id: e.id || `emp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          company_id: companyId,
+          name: e.name,
+          role: e.role,
+          machine: e.machine || null,
+          salary: e.salary || 0
+        }));
+        await client.from('employees').upsert(rows);
+      }
+    } catch (e) {
+      console.warn('Real-time Supabase sync warning:', e);
+    }
   }
 }
 
@@ -179,19 +291,14 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
   for (const key of keysToSync) {
     try {
       const localRaw = localStorage.getItem(scopedKey(key));
-      let val: any = null;
-      if (localRaw) {
-        val = JSON.parse(localRaw);
-      } else {
-        if (key === 'inventory') val = DEFAULT_INVENTORY;
-        else if (key === 'employees') val = DEFAULT_EMPLOYEES;
-        else if (key === 'companySettings') val = DEFAULT_COMPANY_SETTINGS;
-        else if (key === 'productionOrders') val = DEFAULT_PRODUCTION_ORDERS;
-        else if (key === 'varietyCatalog') val = DEFAULT_VARIETIES;
-        else if (key === 'qualityAudits') val = DEFAULT_QUALITY_AUDITS;
-        else if (key === 'routineReminders') val = DEFAULT_ROUTINE_REMINDERS;
-        else val = [];
+      // CRITICAL FIX: Only sync if local data actually exists in local storage!
+      // Do NOT construct fallback defaults here, otherwise fresh browser sessions
+      // will overwrite existing Cloud data with empty/default data.
+      if (!localRaw) {
+        continue;
       }
+
+      const val = JSON.parse(localRaw);
 
       // 1. Sync to app_state
       const { error: appStateErr } = await client.from('app_state').upsert({
@@ -207,7 +314,7 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
         console.warn(`Upsert warning for key ${key} on app_state:`, appStateErr);
       }
 
-      // 2. Sync to relational table if table exists
+      // 2. Sync to relational table if array with items
       if (key === 'salesBills' && Array.isArray(val) && val.length > 0) {
         const rows = val.map((b: SalesBill) => ({
           id: b.id || `sb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -279,17 +386,19 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
     }
   }
 
-  // Also sync global companies
+  // Also sync global companies if exists locally
   try {
     const compsRaw = localStorage.getItem(GLOBAL_STORE_PREFIX + 'companies');
-    const comps = compsRaw ? JSON.parse(compsRaw) : DEFAULT_SUBSIDIARY_COMPANIES;
-    await client.from('app_state').upsert({
-      company_id: 'global',
-      store_key: 'companies',
-      payload: comps,
-      updated_at: new Date().toISOString()
-    });
-    syncedCount++;
+    if (compsRaw) {
+      const comps = JSON.parse(compsRaw);
+      await client.from('app_state').upsert({
+        company_id: 'global',
+        store_key: 'companies',
+        payload: comps,
+        updated_at: new Date().toISOString()
+      });
+      syncedCount++;
+    }
   } catch (e) {}
 
   return { syncedKeys: syncedCount };

@@ -68,6 +68,7 @@ import {
   Settings as SettingsIcon,
   Database,
   AlertTriangle,
+  AlertCircle,
   CheckCircle2,
   Plus,
   Menu,
@@ -268,12 +269,12 @@ export default function App() {
   // Manual Refresh & Cloud Sync State
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const handleRefreshData = async () => {
-    setIsRefreshing(true);
-    showToast('🔄 Uploading & Syncing latest data to Supabase Cloud...');
+  const handleRefreshData = async (silent: boolean = false) => {
+    if (!silent) {
+      setIsRefreshing(true);
+      showToast('🔄 Syncing latest data with Supabase Cloud...');
+    }
     try {
-      const syncRes = await forceSyncAllDataToCloud();
-
       const supCheck = await checkSupabaseConnection();
       setSupabaseStatus(supCheck);
 
@@ -290,7 +291,7 @@ export default function App() {
       setSuppliers(await storeGet<Supplier[]>('suppliers', []));
 
       const loadedInv = await storeGet<InventoryItem[]>('inventory', DEFAULT_INVENTORY);
-      setInventory(loadedInv.length > 0 ? loadedInv : DEFAULT_INVENTORY);
+      setInventory(loadedInv);
 
       const sBills = await storeGet<SalesBill[]>('salesBills', []);
       setSalesBills(sBills);
@@ -301,43 +302,46 @@ export default function App() {
       setPayments(await storeGet<CustomerPayment[]>('payments', []));
 
       const loadedEmp = await storeGet<Employee[]>('employees', DEFAULT_EMPLOYEES);
-      setEmployees(loadedEmp.length > 0 ? loadedEmp : DEFAULT_EMPLOYEES);
+      setEmployees(loadedEmp);
 
       setProductionLogs(await storeGet<ProductionLog[]>('productionLogs', []));
       setSalaryAdvances(await storeGet<SalaryAdvance[]>('salaryAdvances', []));
 
       const loadedOrders = await storeGet<ProductionOrder[]>('productionOrders', DEFAULT_PRODUCTION_ORDERS);
-      setProductionOrders(loadedOrders.length > 0 ? loadedOrders : DEFAULT_PRODUCTION_ORDERS);
+      setProductionOrders(loadedOrders);
 
       const loadedVars = await storeGet<VarietyCatalog[]>('varietyCatalog', DEFAULT_VARIETIES);
-      setVarieties(loadedVars.length > 0 ? loadedVars : DEFAULT_VARIETIES);
+      setVarieties(loadedVars);
 
       const loadedAudits = await storeGet<QualityCheckAudit[]>('qualityAudits', DEFAULT_QUALITY_AUDITS);
-      setQualityAudits(loadedAudits.length > 0 ? loadedAudits : DEFAULT_QUALITY_AUDITS);
+      setQualityAudits(loadedAudits);
 
       const loadedRems = await storeGet<RoutineTaskReminder[]>('routineReminders', DEFAULT_ROUTINE_REMINDERS);
-      setRoutineReminders(loadedRems.length > 0 ? loadedRems : DEFAULT_ROUTINE_REMINDERS);
+      setRoutineReminders(loadedRems);
 
-      if (syncRes.syncedKeys > 0) {
-        showToast(`✅ Synced ${syncRes.syncedKeys} data tables to Supabase Cloud!`);
-      } else {
-        showToast('✅ Data refreshed with Cloud!');
+      // Upload local modifications if any
+      const syncRes = await forceSyncAllDataToCloud();
+
+      if (!silent) {
+        if (syncRes.syncedKeys > 0) {
+          showToast(`✅ Synced ${syncRes.syncedKeys} data tables to Supabase Cloud!`);
+        } else {
+          showToast('✅ Data refreshed with Cloud!');
+        }
       }
     } catch (err) {
-      showToast('Data refresh completed');
+      if (!silent) showToast('Data refresh completed');
     } finally {
-      setIsRefreshing(false);
+      if (!silent) setIsRefreshing(false);
     }
   };
 
   // Load Data on Startup & Company Change
   useEffect(() => {
     async function initData() {
-      // 1. Check Supabase connection & auto-sync existing data
+      // 1. Check Supabase connection
       const supCheck = await checkSupabaseConnection();
       setSupabaseStatus(supCheck);
-
-      await forceSyncAllDataToCloud();
 
       // 2. Load global subsidiary companies
       const comps = await globalGet<SubsidiaryCompany[]>('companies', DEFAULT_SUBSIDIARY_COMPANIES);
@@ -346,7 +350,7 @@ export default function App() {
       const activeId = getActiveCompanyId();
       setCompanyIdState(activeId);
 
-      // 3. Load company scoped data
+      // 3. Load company scoped data (fetches from Cloud first)
       const setts = await storeGet<CompanySettings>('companySettings', DEFAULT_COMPANY_SETTINGS);
       setSettings(setts);
 
@@ -354,7 +358,7 @@ export default function App() {
       setSuppliers(await storeGet<Supplier[]>('suppliers', []));
 
       const loadedInv = await storeGet<InventoryItem[]>('inventory', DEFAULT_INVENTORY);
-      setInventory(loadedInv.length > 0 ? loadedInv : DEFAULT_INVENTORY);
+      setInventory(loadedInv);
 
       const sBills = await storeGet<SalesBill[]>('salesBills', []);
       setSalesBills(sBills);
@@ -375,26 +379,42 @@ export default function App() {
       setPayments(await storeGet<CustomerPayment[]>('payments', []));
 
       const loadedEmp = await storeGet<Employee[]>('employees', DEFAULT_EMPLOYEES);
-      setEmployees(loadedEmp.length > 0 ? loadedEmp : DEFAULT_EMPLOYEES);
+      setEmployees(loadedEmp);
 
       setProductionLogs(await storeGet<ProductionLog[]>('productionLogs', []));
       setSalaryAdvances(await storeGet<SalaryAdvance[]>('salaryAdvances', []));
 
-      // Load new modules with fallback to default seed catalog if empty
       const loadedOrders = await storeGet<ProductionOrder[]>('productionOrders', DEFAULT_PRODUCTION_ORDERS);
-      setProductionOrders(loadedOrders.length > 0 ? loadedOrders : DEFAULT_PRODUCTION_ORDERS);
+      setProductionOrders(loadedOrders);
 
       const loadedVars = await storeGet<VarietyCatalog[]>('varietyCatalog', DEFAULT_VARIETIES);
-      setVarieties(loadedVars.length > 0 ? loadedVars : DEFAULT_VARIETIES);
+      setVarieties(loadedVars);
 
       const loadedAudits = await storeGet<QualityCheckAudit[]>('qualityAudits', DEFAULT_QUALITY_AUDITS);
-      setQualityAudits(loadedAudits.length > 0 ? loadedAudits : DEFAULT_QUALITY_AUDITS);
+      setQualityAudits(loadedAudits);
 
       const loadedRems = await storeGet<RoutineTaskReminder[]>('routineReminders', DEFAULT_ROUTINE_REMINDERS);
-      setRoutineReminders(loadedRems.length > 0 ? loadedRems : DEFAULT_ROUTINE_REMINDERS);
-    }
+      setRoutineReminders(loadedRems);
 
+      // 4. Safely push local changes to Cloud if any
+      await forceSyncAllDataToCloud();
+    }
     initData();
+
+    // Auto-sync on window focus and every 20 seconds
+    const handleFocus = () => {
+      handleRefreshData(true);
+    };
+    window.addEventListener('focus', handleFocus);
+
+    const intervalId = setInterval(() => {
+      handleRefreshData(true);
+    }, 20000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(intervalId);
+    };
   }, [companyId]);
 
   // PWA Event Listener & Online/Offline Status
@@ -1169,6 +1189,23 @@ export default function App() {
 
         {/* MAIN CONTENT AREA */}
         <main className="flex-1 p-5 md:p-7 min-w-0 bg-[#F5F2EA]">
+          {/* Cloud Disconnected Notice for Computer B */}
+          {!supabaseStatus?.connected && (
+            <div className="mb-5 p-3.5 bg-amber-100/90 border border-amber-300 text-amber-900 rounded-none flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-sans shadow-xs">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>
+                  <strong>Cloud Sync Inactive:</strong> This computer/browser is currently on local storage. Enter your Supabase Anon Key to load live Inventory, Bills &amp; Employee data from Computer A!
+                </span>
+              </div>
+              <button
+                onClick={() => setShowSupabaseModal(true)}
+                className="bg-amber-800 hover:bg-amber-900 text-white px-3 py-1.5 rounded font-mono font-bold text-[11px] whitespace-nowrap cursor-pointer transition-colors shadow-xs"
+              >
+                Connect Supabase Credentials →
+              </button>
+            </div>
+          )}
           {/* Active Company Switcher Bar */}
           <div className="company-bar flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 p-4 bg-[#EFECE4] border border-[#DDD7C9] rounded-none">
             <div className="flex flex-col sm:flex-row sm:items-center gap-4 w-full sm:w-auto">
