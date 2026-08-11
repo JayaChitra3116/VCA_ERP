@@ -88,15 +88,12 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
   if (getIsSupabaseConfigured() && client) {
     try {
       const companyId = getActiveCompanyId();
-      await client.from('app_state').upsert(
-        {
-          company_id: companyId,
-          store_key: key,
-          payload: val,
-          updated_at: new Date().toISOString()
-        },
-        { onConflict: 'company_id,store_key' }
-      );
+      await client.from('app_state').upsert({
+        company_id: companyId,
+        store_key: key,
+        payload: val,
+        updated_at: new Date().toISOString()
+      });
     } catch (e) {}
   }
 }
@@ -144,17 +141,158 @@ export async function globalSet<T>(key: string, val: T): Promise<void> {
   const client = getSupabaseClient();
   if (getIsSupabaseConfigured() && client) {
     try {
-      await client.from('app_state').upsert(
-        {
-          company_id: 'global',
-          store_key: key,
-          payload: val,
-          updated_at: new Date().toISOString()
-        },
-        { onConflict: 'company_id,store_key' }
-      );
+      await client.from('app_state').upsert({
+        company_id: 'global',
+        store_key: key,
+        payload: val,
+        updated_at: new Date().toISOString()
+      });
     } catch (e) {}
   }
+}
+
+export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; error?: string }> {
+  const client = getSupabaseClient();
+  if (!getIsSupabaseConfigured() || !client) {
+    return { syncedKeys: 0, error: 'Supabase credentials not configured' };
+  }
+
+  const companyId = getActiveCompanyId();
+  const keysToSync = [
+    'companySettings',
+    'customers',
+    'suppliers',
+    'inventory',
+    'salesBills',
+    'purchaseBills',
+    'payments',
+    'employees',
+    'productionLogs',
+    'salaryAdvances',
+    'productionOrders',
+    'varietyCatalog',
+    'qualityAudits',
+    'routineReminders'
+  ];
+
+  let syncedCount = 0;
+  for (const key of keysToSync) {
+    try {
+      const localRaw = localStorage.getItem(scopedKey(key));
+      let val: any = null;
+      if (localRaw) {
+        val = JSON.parse(localRaw);
+      } else {
+        if (key === 'inventory') val = DEFAULT_INVENTORY;
+        else if (key === 'employees') val = DEFAULT_EMPLOYEES;
+        else if (key === 'companySettings') val = DEFAULT_COMPANY_SETTINGS;
+        else if (key === 'productionOrders') val = DEFAULT_PRODUCTION_ORDERS;
+        else if (key === 'varietyCatalog') val = DEFAULT_VARIETIES;
+        else if (key === 'qualityAudits') val = DEFAULT_QUALITY_AUDITS;
+        else if (key === 'routineReminders') val = DEFAULT_ROUTINE_REMINDERS;
+        else val = [];
+      }
+
+      // 1. Sync to app_state
+      const { error: appStateErr } = await client.from('app_state').upsert({
+        company_id: companyId,
+        store_key: key,
+        payload: val,
+        updated_at: new Date().toISOString()
+      });
+
+      if (!appStateErr) {
+        syncedCount++;
+      } else {
+        console.warn(`Upsert warning for key ${key} on app_state:`, appStateErr);
+      }
+
+      // 2. Sync to relational table if table exists
+      if (key === 'salesBills' && Array.isArray(val) && val.length > 0) {
+        const rows = val.map((b: SalesBill) => ({
+          id: b.id || `sb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          company_id: companyId,
+          bill_no: b.billNo || 'VC-000',
+          date: b.date || new Date().toISOString().split('T')[0],
+          customer_name: b.customerName || 'Customer',
+          customer_phone: b.customerPhone || null,
+          customer_gstin: b.customerGstin || null,
+          customer_address: b.customerAddress || null,
+          customer_state: b.customerState || 'Tamil Nadu',
+          subtotal: b.subtotal || 0,
+          cgst: b.cgst || 0,
+          sgst: b.sgst || 0,
+          igst: b.igst || 0,
+          grand_total: b.grand || 0,
+          status: b.status || 'pending',
+          items: b.items || []
+        }));
+        await client.from('sales_bills').upsert(rows);
+      } else if (key === 'customers' && Array.isArray(val) && val.length > 0) {
+        const rows = val.map((c: Customer) => ({
+          id: c.id || `cust_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          company_id: companyId,
+          name: c.name,
+          phone: c.phone || null,
+          gstin: c.gstin || null,
+          address: c.address || null,
+          state: c.state || 'Tamil Nadu',
+          pincode: c.pincode || null,
+          balance: 0
+        }));
+        await client.from('customers').upsert(rows);
+      } else if (key === 'suppliers' && Array.isArray(val) && val.length > 0) {
+        const rows = val.map((s: Supplier) => ({
+          id: s.id || `supp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          company_id: companyId,
+          name: s.name,
+          phone: s.phone || null,
+          gstin: s.gstin || null,
+          address: s.address || null,
+          balance: 0
+        }));
+        await client.from('suppliers').upsert(rows);
+      } else if (key === 'inventory' && Array.isArray(val) && val.length > 0) {
+        const rows = val.map((item: InventoryItem) => ({
+          id: item.id || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          company_id: companyId,
+          name: item.name,
+          type: item.type,
+          unit: item.unit,
+          qty: item.qty || 0,
+          reorder_level: item.reorderLevel || 0
+        }));
+        await client.from('inventory').upsert(rows);
+      } else if (key === 'employees' && Array.isArray(val) && val.length > 0) {
+        const rows = val.map((e: Employee) => ({
+          id: e.id || `emp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          company_id: companyId,
+          name: e.name,
+          role: e.role,
+          machine: e.machine || null,
+          salary: e.salary || 0
+        }));
+        await client.from('employees').upsert(rows);
+      }
+    } catch (e) {
+      console.error(`Error syncing key ${key}:`, e);
+    }
+  }
+
+  // Also sync global companies
+  try {
+    const compsRaw = localStorage.getItem(GLOBAL_STORE_PREFIX + 'companies');
+    const comps = compsRaw ? JSON.parse(compsRaw) : DEFAULT_SUBSIDIARY_COMPANIES;
+    await client.from('app_state').upsert({
+      company_id: 'global',
+      store_key: 'companies',
+      payload: comps,
+      updated_at: new Date().toISOString()
+    });
+    syncedCount++;
+  } catch (e) {}
+
+  return { syncedKeys: syncedCount };
 }
 
 // DEFAULT INITIAL SEED DATA FOR NEW INSTALLATIONS

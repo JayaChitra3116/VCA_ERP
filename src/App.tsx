@@ -24,6 +24,7 @@ import {
   globalSet,
   getActiveCompanyId,
   setActiveCompanyId,
+  forceSyncAllDataToCloud,
   DEFAULT_COMPANY_SETTINGS,
   DEFAULT_SUBSIDIARY_COMPANIES,
   DEFAULT_LOGO_DATA_URL,
@@ -269,8 +270,10 @@ export default function App() {
 
   const handleRefreshData = async () => {
     setIsRefreshing(true);
-    showToast('🔄 Syncing and refreshing latest data from Cloud...');
+    showToast('🔄 Uploading & Syncing latest data to Supabase Cloud...');
     try {
+      const syncRes = await forceSyncAllDataToCloud();
+
       const supCheck = await checkSupabaseConnection();
       setSupabaseStatus(supCheck);
 
@@ -315,7 +318,11 @@ export default function App() {
       const loadedRems = await storeGet<RoutineTaskReminder[]>('routineReminders', DEFAULT_ROUTINE_REMINDERS);
       setRoutineReminders(loadedRems.length > 0 ? loadedRems : DEFAULT_ROUTINE_REMINDERS);
 
-      showToast('✅ Data refreshed & synced with Cloud!');
+      if (syncRes.syncedKeys > 0) {
+        showToast(`✅ Synced ${syncRes.syncedKeys} data tables to Supabase Cloud!`);
+      } else {
+        showToast('✅ Data refreshed with Cloud!');
+      }
     } catch (err) {
       showToast('Data refresh completed');
     } finally {
@@ -326,9 +333,11 @@ export default function App() {
   // Load Data on Startup & Company Change
   useEffect(() => {
     async function initData() {
-      // 1. Check Supabase connection
+      // 1. Check Supabase connection & auto-sync existing data
       const supCheck = await checkSupabaseConnection();
       setSupabaseStatus(supCheck);
+
+      await forceSyncAllDataToCloud();
 
       // 2. Load global subsidiary companies
       const comps = await globalGet<SubsidiaryCompany[]>('companies', DEFAULT_SUBSIDIARY_COMPANIES);
