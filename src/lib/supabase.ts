@@ -23,6 +23,7 @@ export interface SupabaseHealthStatus {
 }
 
 export const EXPECTED_TABLES = [
+  'app_state',
   'companies',
   'company_settings',
   'customers',

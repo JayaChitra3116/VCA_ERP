@@ -75,6 +75,7 @@ import {
   Edit3,
   Eye,
   Trash2,
+  RefreshCw,
   Save,
   User,
   UserPlus,
@@ -283,7 +284,10 @@ export default function App() {
 
       setCustomers(await storeGet<Customer[]>('customers', []));
       setSuppliers(await storeGet<Supplier[]>('suppliers', []));
-      setInventory(await storeGet<InventoryItem[]>('inventory', DEFAULT_INVENTORY));
+
+      const loadedInv = await storeGet<InventoryItem[]>('inventory', DEFAULT_INVENTORY);
+      setInventory(loadedInv.length > 0 ? loadedInv : DEFAULT_INVENTORY);
+
       const sBills = await storeGet<SalesBill[]>('salesBills', []);
       setSalesBills(sBills);
 
@@ -301,15 +305,25 @@ export default function App() {
       setPbPoNo(`PO-${String(pBills.length + 1).padStart(4, '0')}`);
 
       setPayments(await storeGet<CustomerPayment[]>('payments', []));
-      setEmployees(await storeGet<Employee[]>('employees', DEFAULT_EMPLOYEES));
+
+      const loadedEmp = await storeGet<Employee[]>('employees', DEFAULT_EMPLOYEES);
+      setEmployees(loadedEmp.length > 0 ? loadedEmp : DEFAULT_EMPLOYEES);
+
       setProductionLogs(await storeGet<ProductionLog[]>('productionLogs', []));
       setSalaryAdvances(await storeGet<SalaryAdvance[]>('salaryAdvances', []));
 
-      // Load new modules
-      setProductionOrders(await storeGet<ProductionOrder[]>('productionOrders', DEFAULT_PRODUCTION_ORDERS));
-      setVarieties(await storeGet<VarietyCatalog[]>('varietyCatalog', DEFAULT_VARIETIES));
-      setQualityAudits(await storeGet<QualityCheckAudit[]>('qualityAudits', DEFAULT_QUALITY_AUDITS));
-      setRoutineReminders(await storeGet<RoutineTaskReminder[]>('routineReminders', DEFAULT_ROUTINE_REMINDERS));
+      // Load new modules with fallback to default seed catalog if empty
+      const loadedOrders = await storeGet<ProductionOrder[]>('productionOrders', DEFAULT_PRODUCTION_ORDERS);
+      setProductionOrders(loadedOrders.length > 0 ? loadedOrders : DEFAULT_PRODUCTION_ORDERS);
+
+      const loadedVars = await storeGet<VarietyCatalog[]>('varietyCatalog', DEFAULT_VARIETIES);
+      setVarieties(loadedVars.length > 0 ? loadedVars : DEFAULT_VARIETIES);
+
+      const loadedAudits = await storeGet<QualityCheckAudit[]>('qualityAudits', DEFAULT_QUALITY_AUDITS);
+      setQualityAudits(loadedAudits.length > 0 ? loadedAudits : DEFAULT_QUALITY_AUDITS);
+
+      const loadedRems = await storeGet<RoutineTaskReminder[]>('routineReminders', DEFAULT_ROUTINE_REMINDERS);
+      setRoutineReminders(loadedRems.length > 0 ? loadedRems : DEFAULT_ROUTINE_REMINDERS);
     }
 
     initData();
@@ -2131,41 +2145,67 @@ export default function App() {
 
                   {/* RESET & DATA PURGE FOR LIVE PRODUCTION USE */}
                   <div className="mt-6 pt-5 border-t border-slate-200 bg-rose-50/50 p-4 rounded-xl border border-rose-200">
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div>
                         <h3 className="text-sm font-bold text-rose-900 m-0 flex items-center gap-2">
                           <Trash2 className="w-4 h-4 text-rose-600" />
-                          <span>Production Readiness & Test Data Purge</span>
+                          <span>Production Readiness & Sample Data Controls</span>
                         </h3>
                         <p className="text-xs text-rose-700 m-0 mt-1">
-                          Going live for daily work? Clear all sample test bills, orders, quality records, customers, and dummy logs with one click. Your Company Name & Settings will be <strong>100% preserved</strong>.
+                          Manage your live database. Purge test data for a clean slate or reload the default towel catalog, employee list, and quality checks at any time. Your Company Name & Profile will be <strong>100% preserved</strong>.
                         </p>
                       </div>
-                      <button
-                        onClick={async () => {
-                          if (confirm('Are you sure you want to delete ALL test bills, orders, inventory, customers, suppliers & logs? Company profile settings will be kept intact.')) {
-                            await clearAllTestData();
-                            setCustomers([]);
-                            setSuppliers([]);
-                            setInventory([]);
-                            setSalesBills([]);
-                            setPurchaseBills([]);
-                            setPayments([]);
-                            setEmployees([]);
-                            setProductionLogs([]);
-                            setSalaryAdvances([]);
-                            setProductionOrders([]);
-                            setVarieties([]);
-                            setQualityAudits([]);
-                            setRoutineReminders([]);
-                            showToast('All test data cleared! App is ready for live production use.');
-                          }
-                        }}
-                        className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg cursor-pointer transition-colors shrink-0 shadow-xs flex items-center gap-1.5"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        <span>Purge All Test Data</span>
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={async () => {
+                            if (confirm('Load default towel varieties catalog, employees, orders, and quality check samples?')) {
+                              setInventory(DEFAULT_INVENTORY);
+                              await storeSet('inventory', DEFAULT_INVENTORY);
+                              setEmployees(DEFAULT_EMPLOYEES);
+                              await storeSet('employees', DEFAULT_EMPLOYEES);
+                              setProductionOrders(DEFAULT_PRODUCTION_ORDERS);
+                              await storeSet('productionOrders', DEFAULT_PRODUCTION_ORDERS);
+                              setVarieties(DEFAULT_VARIETIES);
+                              await storeSet('varietyCatalog', DEFAULT_VARIETIES);
+                              setQualityAudits(DEFAULT_QUALITY_AUDITS);
+                              await storeSet('qualityAudits', DEFAULT_QUALITY_AUDITS);
+                              setRoutineReminders(DEFAULT_ROUTINE_REMINDERS);
+                              await storeSet('routineReminders', DEFAULT_ROUTINE_REMINDERS);
+                              showToast('Default catalog & sample data loaded successfully!');
+                            }
+                          }}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-2 rounded-lg cursor-pointer transition-colors shadow-xs flex items-center gap-1.5"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Reload Default Catalog</span>
+                        </button>
+
+                        <button
+                          onClick={async () => {
+                            if (confirm('Are you sure you want to delete ALL test bills, orders, inventory, customers, suppliers & logs? Company profile settings will be kept intact.')) {
+                              await clearAllTestData();
+                              setCustomers([]);
+                              setSuppliers([]);
+                              setInventory([]);
+                              setSalesBills([]);
+                              setPurchaseBills([]);
+                              setPayments([]);
+                              setEmployees([]);
+                              setProductionLogs([]);
+                              setSalaryAdvances([]);
+                              setProductionOrders([]);
+                              setVarieties([]);
+                              setQualityAudits([]);
+                              setRoutineReminders([]);
+                              showToast('All test data cleared! App is ready for live production use.');
+                            }
+                          }}
+                          className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-3 py-2 rounded-lg cursor-pointer transition-colors shadow-xs flex items-center gap-1.5"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Purge Test Data</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
