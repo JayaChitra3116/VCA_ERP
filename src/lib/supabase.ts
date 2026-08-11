@@ -1,25 +1,85 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const LOCAL_STORAGE_URL_KEY = 'vca_supabase_url';
+const LOCAL_STORAGE_ANON_KEY = 'vca_supabase_anon_key';
 
-export const isSupabaseConfigured = Boolean(
-  supabaseUrl && 
-  supabaseAnonKey && 
-  supabaseUrl.trim() !== '' && 
-  supabaseAnonKey.trim() !== '' &&
-  !supabaseUrl.includes('YOUR_SUPABASE')
-);
+export function getSupabaseCredentials(): { url: string; anonKey: string } {
+  let url = import.meta.env.VITE_SUPABASE_URL || 'https://lfmjmhcqrpsjtnubaxym.supabase.co';
+  let anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
-export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey)
-  : null;
+  try {
+    const customUrl = localStorage.getItem(LOCAL_STORAGE_URL_KEY);
+    const customKey = localStorage.getItem(LOCAL_STORAGE_ANON_KEY);
+    if (customUrl && customUrl.trim()) url = customUrl.trim();
+    if (customKey && customKey.trim()) anonKey = customKey.trim();
+  } catch {}
+
+  return { url, anonKey };
+}
+
+export function saveSupabaseCredentials(url: string, anonKey: string) {
+  try {
+    if (url && url.trim()) {
+      localStorage.setItem(LOCAL_STORAGE_URL_KEY, url.trim());
+    } else {
+      localStorage.removeItem(LOCAL_STORAGE_URL_KEY);
+    }
+
+    if (anonKey && anonKey.trim()) {
+      localStorage.setItem(LOCAL_STORAGE_ANON_KEY, anonKey.trim());
+    } else {
+      localStorage.removeItem(LOCAL_STORAGE_ANON_KEY);
+    }
+  } catch {}
+  refreshSupabaseClient();
+}
+
+let activeClient: SupabaseClient | null = null;
+
+export function refreshSupabaseClient(): SupabaseClient | null {
+  const { url, anonKey } = getSupabaseCredentials();
+  if (
+    url && 
+    anonKey && 
+    url.trim() !== '' && 
+    anonKey.trim() !== '' &&
+    !url.includes('YOUR_SUPABASE')
+  ) {
+    activeClient = createClient(url, anonKey);
+  } else {
+    activeClient = null;
+  }
+  return activeClient;
+}
+
+export function getSupabaseClient(): SupabaseClient | null {
+  if (!activeClient) {
+    return refreshSupabaseClient();
+  }
+  return activeClient;
+}
+
+export function getIsSupabaseConfigured(): boolean {
+  const { url, anonKey } = getSupabaseCredentials();
+  return Boolean(
+    url && 
+    anonKey && 
+    url.trim() !== '' && 
+    anonKey.trim() !== '' &&
+    !url.includes('YOUR_SUPABASE')
+  );
+}
+
+// Backwards compatibility exports
+export const isSupabaseConfigured = getIsSupabaseConfigured();
+export const supabase = getSupabaseClient();
 
 export interface SupabaseHealthStatus {
   configured: boolean;
   connected: boolean;
   missingTables: string[];
   message: string;
+  urlUsed?: string;
 }
 
 export const EXPECTED_TABLES = [
@@ -42,12 +102,16 @@ export const EXPECTED_TABLES = [
 ];
 
 export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
-  if (!isSupabaseConfigured || !supabase) {
+  const client = getSupabaseClient();
+  const { url } = getSupabaseCredentials();
+  const configured = getIsSupabaseConfigured();
+
+  if (!configured || !client) {
     return {
       configured: false,
       connected: false,
       missingTables: EXPECTED_TABLES,
-      message: 'Supabase URL or Anon Key is missing in environment (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY).'
+      message: 'Supabase Project URL or Anon Key is missing. Enter your credentials below to connect to your Supabase project (lfmjmhcqrpsjtnubaxym).'
     };
   }
 
@@ -56,7 +120,7 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
     
     // Test table access individually
     for (const table of EXPECTED_TABLES) {
-      const { error } = await supabase.from(table).select('count', { count: 'exact', head: true });
+      const { error } = await client.from(table).select('count', { count: 'exact', head: true });
       if (error && (error.code === 'PGRST301' || error.code === '42P01' || error.message.includes('relation') || error.message.includes('does not exist'))) {
         missingTables.push(table);
       }
@@ -67,7 +131,8 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
         configured: true,
         connected: true,
         missingTables,
-        message: `Connected to Supabase, but ${missingTables.length} table(s) are missing (${missingTables.join(', ')}). Run the schema SQL script to set them up.`
+        urlUsed: url,
+        message: `Connected to Supabase (${url}), but ${missingTables.length} table(s) are missing (${missingTables.join(', ')}). Run the schema SQL script in SQL Editor to enable all features.`
       };
     }
 
@@ -75,14 +140,17 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
       configured: true,
       connected: true,
       missingTables: [],
-      message: `Successfully connected to Supabase! All ${EXPECTED_TABLES.length} required tables are verified and ready for cross-device sync.`
+      urlUsed: url,
+      message: `Successfully connected to Supabase project (${url})! All ${EXPECTED_TABLES.length} required tables are verified and ready.`
     };
   } catch (err: any) {
     return {
       configured: true,
       connected: false,
       missingTables: EXPECTED_TABLES,
-      message: `Failed to connect to Supabase: ${err?.message || String(err)}`
+      urlUsed: url,
+      message: `Failed to connect to Supabase (${url}): ${err?.message || String(err)}`
     };
   }
 }
+

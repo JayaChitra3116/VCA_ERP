@@ -15,7 +15,7 @@ import {
   ProductionLog, 
   SalaryAdvance 
 } from '../types';
-import { supabase, isSupabaseConfigured } from './supabase';
+import { getSupabaseClient, getIsSupabaseConfigured } from './supabase';
 import { VCA_LOGO_DATA_URL } from '../assets/vcaLogoData';
 
 const STORE_PREFIX = 'vcaPreview:';
@@ -53,10 +53,11 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
     }
   } catch (e) {}
 
-  if (isSupabaseConfigured && supabase) {
+  const client = getSupabaseClient();
+  if (getIsSupabaseConfigured() && client) {
     try {
       const companyId = getActiveCompanyId();
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from('app_state')
         .select('payload')
         .eq('company_id', companyId)
@@ -83,10 +84,11 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
     localStorage.setItem(scopedKey(key), JSON.stringify(val));
   } catch (e) {}
 
-  if (isSupabaseConfigured && supabase) {
+  const client = getSupabaseClient();
+  if (getIsSupabaseConfigured() && client) {
     try {
       const companyId = getActiveCompanyId();
-      await supabase.from('app_state').upsert(
+      await client.from('app_state').upsert(
         {
           company_id: companyId,
           store_key: key,
@@ -110,9 +112,10 @@ export async function globalGet<T>(key: string, fallback: T): Promise<T> {
     }
   } catch (e) {}
 
-  if (isSupabaseConfigured && supabase) {
+  const client = getSupabaseClient();
+  if (getIsSupabaseConfigured() && client) {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from('app_state')
         .select('payload')
         .eq('company_id', 'global')
@@ -138,9 +141,10 @@ export async function globalSet<T>(key: string, val: T): Promise<void> {
     localStorage.setItem(GLOBAL_STORE_PREFIX + key, JSON.stringify(val));
   } catch (e) {}
 
-  if (isSupabaseConfigured && supabase) {
+  const client = getSupabaseClient();
+  if (getIsSupabaseConfigured() && client) {
     try {
-      await supabase.from('app_state').upsert(
+      await client.from('app_state').upsert(
         {
           company_id: 'global',
           store_key: key,

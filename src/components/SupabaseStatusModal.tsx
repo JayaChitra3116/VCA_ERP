@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
-import { checkSupabaseConnection, SupabaseHealthStatus, EXPECTED_TABLES } from '../lib/supabase';
-import { Database, CheckCircle2, AlertCircle, RefreshCw, Copy, Server } from 'lucide-react';
+import { 
+  checkSupabaseConnection, 
+  SupabaseHealthStatus, 
+  EXPECTED_TABLES, 
+  getSupabaseCredentials, 
+  saveSupabaseCredentials 
+} from '../lib/supabase';
+import { Database, CheckCircle2, AlertCircle, RefreshCw, Server, Key, Link2, Save } from 'lucide-react';
 
 interface SupabaseStatusModalProps {
   onClose: () => void;
@@ -9,7 +15,11 @@ interface SupabaseStatusModalProps {
 export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClose }) => {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<SupabaseHealthStatus | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const initialCreds = getSupabaseCredentials();
+  const [urlInput, setUrlInput] = useState(initialCreds.url || 'https://lfmjmhcqrpsjtnubaxym.supabase.co');
+  const [keyInput, setKeyInput] = useState(initialCreds.anonKey || '');
 
   const handleTestConnection = async () => {
     setLoading(true);
@@ -18,16 +28,17 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
     setLoading(false);
   };
 
+  const handleSaveCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    saveSupabaseCredentials(urlInput, keyInput);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
+    await handleTestConnection();
+  };
+
   React.useEffect(() => {
     handleTestConnection();
   }, []);
-
-  const copySqlInstruction = () => {
-    const sqlUrl = window.location.origin + '/supabase-schema.sql';
-    navigator.clipboard.writeText(sqlUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   return (
     <div className="modal-backdrop">
@@ -35,20 +46,78 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
         <div className="modal-head">
           <h2 className="flex items-center gap-2">
             <Database className="w-5 h-5 text-indigo-700" />
-            <span>Supabase Connection & Table Alignment Diagnostic</span>
+            <span>Supabase Database Credentials & Connection Setup</span>
           </h2>
           <button className="close-btn" aria-label="Close" onClick={onClose}>×</button>
         </div>
 
         <div className="space-y-4 text-xs font-sans overflow-y-auto flex-1 p-4">
+          {/* Connection Credentials Form */}
+          <form onSubmit={handleSaveCredentials} className="p-4 rounded-lg border border-indigo-200 bg-indigo-50/50 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-indigo-900 uppercase font-extrabold text-[11px] flex items-center gap-1.5">
+                <Link2 className="w-4 h-4 text-indigo-600" />
+                <span>Supabase Project Connection Config</span>
+              </span>
+              {saveSuccess && (
+                <span className="text-emerald-700 font-bold text-xs flex items-center gap-1 bg-emerald-100 px-2 py-0.5 rounded">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Saved & Configured!
+                </span>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-slate-700 font-mono text-[11px] font-bold mb-1">
+                Supabase Project URL:
+              </label>
+              <input
+                type="url"
+                required
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                placeholder="https://lfmjmhcqrpsjtnubaxym.supabase.co"
+                className="w-full p-2 border border-slate-300 rounded text-slate-800 bg-white font-mono text-xs focus:border-indigo-600 outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-700 font-mono text-[11px] font-bold mb-1 flex items-center gap-1">
+                <Key className="w-3 h-3 text-amber-600" />
+                <span>Supabase Anon / Public Key:</span>
+              </label>
+              <input
+                type="password"
+                required
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value)}
+                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                className="w-full p-2 border border-slate-300 rounded text-slate-800 bg-white font-mono text-xs focus:border-indigo-600 outline-none"
+              />
+              <span className="text-[10px] text-slate-500 mt-1 block">
+                Found in your Supabase Dashboard &gt; Project Settings &gt; API &gt; <code>anon</code> <code>public</code> key.
+              </span>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="submit"
+                className="bg-indigo-700 hover:bg-indigo-800 text-white font-mono font-bold text-xs px-4 py-2 rounded flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save Credentials &amp; Test Connection</span>
+              </button>
+            </div>
+          </form>
+
           {/* Status Box */}
           <div className="p-4 rounded border bg-slate-50 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="font-mono text-slate-500 uppercase font-bold text-[10px]">Database Connection Status</span>
+              <span className="font-mono text-slate-500 uppercase font-bold text-[10px]">Database Status Check</span>
               <button
+                type="button"
                 onClick={handleTestConnection}
                 disabled={loading}
-                className="btn text-[11px] py-1 px-3 flex items-center gap-1 border-slate-300"
+                className="btn text-[11px] py-1 px-3 flex items-center gap-1 border-slate-300 cursor-pointer"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
                 <span>Re-Test Connection</span>
@@ -57,7 +126,7 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
 
             {loading ? (
               <div className="text-slate-600 font-mono animate-pulse py-2">
-                Checking Supabase URL, API Key & Table Schemas...
+                Testing Supabase URL, API Key & Table Schemas...
               </div>
             ) : status ? (
               <div className="space-y-2">
@@ -112,22 +181,10 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
             </div>
           </div>
 
-          {/* Setup / SQL Script Instructions */}
-          <div className="bg-indigo-50/70 border border-indigo-200 p-3.5 rounded text-xs space-y-2">
-            <span className="font-bold text-indigo-900 block font-mono text-[10px] uppercase">
-              Supabase Quick Setup Instructions:
-            </span>
-            <ol className="list-decimal list-inside text-indigo-800 space-y-1">
-              <li>In AI Studio Settings / Secrets, add <strong>VITE_SUPABASE_URL</strong> and <strong>VITE_SUPABASE_ANON_KEY</strong>.</li>
-              <li>In your Supabase Dashboard, open <strong>SQL Editor</strong>.</li>
-              <li>Run the provided schema script (or copy from <code>/supabase-schema.sql</code> in code explorer) to create all 15 tables automatically.</li>
-            </ol>
-          </div>
-
           <div className="flex justify-end pt-2">
             <button
               onClick={onClose}
-              className="btn primary"
+              className="btn primary cursor-pointer"
             >
               Done
             </button>

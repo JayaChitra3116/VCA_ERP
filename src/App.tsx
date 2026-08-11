@@ -1130,18 +1130,24 @@ export default function App() {
           </div>
 
           <div className="pt-4 mt-6 border-t border-[#D0C8B8] text-xs font-bold text-[#4A5C6C] flex items-center justify-between font-mono">
-            <button
-              onClick={handleRefreshData}
-              disabled={isRefreshing}
-              className="flex items-center gap-2 hover:text-[#182228] cursor-pointer"
-              title="Click to Refresh Cloud Data"
-            >
-              <div className={`w-2.5 h-2.5 rounded-full ${supabaseStatus?.connected ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'}`}></div>
-              <span className="flex items-center gap-1">
-                {supabaseStatus?.connected ? 'Supabase Sync' : 'Local Storage'}
-                <RefreshCw className={`w-3 h-3 ml-1 ${isRefreshing ? 'animate-spin' : ''}`} />
-              </span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowSupabaseModal(true)}
+                className="flex items-center gap-2 hover:text-[#182228] cursor-pointer"
+                title="Click to view Supabase Connection & Diagnostics Popup"
+              >
+                <div className={`w-2.5 h-2.5 rounded-full ${supabaseStatus?.connected ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'}`}></div>
+                <span>{supabaseStatus?.connected ? 'Supabase Sync' : 'Local Storage'}</span>
+              </button>
+              <button
+                onClick={handleRefreshData}
+                disabled={isRefreshing}
+                className="p-1 hover:text-[#182228] cursor-pointer"
+                title="Sync & Refresh Data from Cloud"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-[#8B5E1E] ${isRefreshing ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
             <button
               onClick={() => setShowSecurityModal(true)}
               className="p-1 hover:text-[#182228] transition-colors cursor-pointer"
