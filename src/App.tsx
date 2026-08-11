@@ -32,7 +32,8 @@ import {
   DEFAULT_QUALITY_AUDITS,
   DEFAULT_ROUTINE_REMINDERS,
   DEFAULT_PRODUCTION_ORDERS,
-  DEFAULT_EMPLOYEES
+  DEFAULT_EMPLOYEES,
+  clearAllTestData
 } from './lib/storage';
 import { VCA_LOGO_DATA_URL } from './assets/vcaLogoData';
 
@@ -668,22 +669,22 @@ export default function App() {
     const itemRows = displayItems
       .map(
         (i: any, idx: number) => `<tr>
-      <td style="border:1px solid #0f172a; padding:5px 4px; text-align:center; font-family:monospace; font-size:11px;">${idx + 1}</td>
-      <td style="border:1px solid #0f172a; padding:5px 6px; font-weight:bold; font-size:11.5px; color:#0f172a;">${escHtml(i.name)}</td>
-      <td style="border:1px solid #0f172a; padding:5px 4px; text-align:center; font-family:monospace; font-size:11px;">${escHtml(i.hsn || '6304')}</td>
-      <td style="border:1px solid #0f172a; padding:5px 4px; text-align:center; font-family:monospace; font-size:11px;">${isSalesBill2 ? '0%' : i.taxRate + '%'}</td>
-      <td style="border:1px solid #0f172a; padding:5px 6px; text-align:right; font-family:monospace; font-weight:bold; font-size:11.5px;">${Number(i.qty).toFixed(i.qty % 1 ? 2 : 0)}</td>
-      <td style="border:1px solid #0f172a; padding:5px 4px; text-align:center; font-size:11px;">${escHtml(i.unit || 'Pcs')}</td>
-      <td style="border:1px solid #0f172a; padding:5px 6px; text-align:right; font-family:monospace; font-size:11.5px;">${Number(i.rate).toFixed(2)}</td>
-      <td style="border:1px solid #0f172a; padding:5px 4px; text-align:center; font-family:monospace; font-size:11px;">${i.discPct ? Number(i.discPct).toFixed(1) + '%' : '—'}</td>
-      <td style="border:1px solid #0f172a; padding:5px 6px; text-align:right; font-family:monospace; font-weight:bold; font-size:11.5px;">${Number(i.taxable).toFixed(2)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 3px; text-align:center; font-family:monospace; font-size:11.5px;">${idx + 1}</td>
+      <td style="border:1px solid #0f172a; padding:3px 6px; font-weight:bold; font-size:12.5px; color:#0f172a;">${escHtml(i.name)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 3px; text-align:center; font-family:monospace; font-size:11.5px;">${escHtml(i.hsn || '6304')}</td>
+      <td style="border:1px solid #0f172a; padding:3px 3px; text-align:center; font-family:monospace; font-size:11.5px;">${isSalesBill2 ? '0%' : i.taxRate + '%'}</td>
+      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:right; font-family:monospace; font-weight:bold; font-size:12.5px;">${Number(i.qty).toFixed(i.qty % 1 ? 2 : 0)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 3px; text-align:center; font-size:11.5px;">${escHtml(i.unit || 'Pcs')}</td>
+      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:right; font-family:monospace; font-size:12.5px;">${Number(i.rate).toFixed(2)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 3px; text-align:center; font-family:monospace; font-size:11.5px;">${i.discPct ? Number(i.discPct).toFixed(1) + '%' : '—'}</td>
+      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-weight:bold; font-size:12.5px;">${Number(i.taxable).toFixed(2)}</td>
     </tr>`
       )
       .join('');
 
-    // Blank space filler row: only vertical column borders, fills full page height
-    const fillerHeight = Math.max(50, 240 - displayItems.length * 28);
-    const fillerRow = `<tr>
+    // Blank space filler row: fills empty space for short bills, omitted for 10-15 items to guarantee single A4 page fit
+    const fillerHeight = displayItems.length >= 10 ? 0 : Math.max(15, 150 - displayItems.length * 16);
+    const fillerRow = fillerHeight > 0 ? `<tr>
       <td style="border-right:1px solid #0f172a; border-left:1px solid #0f172a; height:${fillerHeight}px;"></td>
       <td style="border-right:1px solid #0f172a; height:${fillerHeight}px;"></td>
       <td style="border-right:1px solid #0f172a; height:${fillerHeight}px;"></td>
@@ -693,7 +694,7 @@ export default function App() {
       <td style="border-right:1px solid #0f172a; height:${fillerHeight}px;"></td>
       <td style="border-right:1px solid #0f172a; height:${fillerHeight}px;"></td>
       <td style="border-right:1px solid #0f172a; height:${fillerHeight}px;"></td>
-    </tr>`;
+    </tr>` : '';
 
     const rows = itemRows + fillerRow;
 
@@ -709,27 +710,27 @@ export default function App() {
     const hsnRows = Object.entries(hsnMap)
       .map(
         ([hsn, v]: [string, any]) => `<tr>
-      <td style="border:1px solid #0f172a; padding:3.5px 5px; text-align:center; font-family:monospace;">${escHtml(hsn)}</td>
-      <td style="border:1px solid #0f172a; padding:3.5px 6px; text-align:right; font-family:monospace;">${v.taxable.toFixed(2)}</td>
-      <td style="border:1px solid #0f172a; padding:3.5px 5px; text-align:center; font-family:monospace;">${v.cgst ? v.cgstRate.toFixed(1) + '%' : '—'}</td>
-      <td style="border:1px solid #0f172a; padding:3.5px 6px; text-align:right; font-family:monospace;">${v.cgst.toFixed(2)}</td>
-      <td style="border:1px solid #0f172a; padding:3.5px 5px; text-align:center; font-family:monospace;">${v.sgst ? v.sgstRate.toFixed(1) + '%' : '—'}</td>
-      <td style="border:1px solid #0f172a; padding:3.5px 6px; text-align:right; font-family:monospace;">${v.sgst.toFixed(2)}</td>
-      <td style="border:1px solid #0f172a; padding:3.5px 5px; text-align:center; font-family:monospace;">${v.igst ? v.igstRate.toFixed(1) + '%' : '—'}</td>
-      <td style="border:1px solid #0f172a; padding:3.5px 6px; text-align:right; font-family:monospace;">${v.igst.toFixed(2)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:center; font-family:monospace; font-size:11px;">${escHtml(hsn)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-size:11px;">${v.taxable.toFixed(2)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:center; font-family:monospace; font-size:11px;">${v.cgst ? v.cgstRate.toFixed(1) + '%' : '—'}</td>
+      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-size:11px;">${v.cgst.toFixed(2)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:center; font-family:monospace; font-size:11px;">${v.sgst ? v.sgstRate.toFixed(1) + '%' : '—'}</td>
+      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-size:11px;">${v.sgst.toFixed(2)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:center; font-family:monospace; font-size:11px;">${v.igst ? v.igstRate.toFixed(1) + '%' : '—'}</td>
+      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-size:11px;">${v.igst.toFixed(2)}</td>
     </tr>`
       )
       .join('');
 
     const rawLogo = settings.logo ? settings.logo.trim() : '';
-    let logoHtml = `<img class="inv-logo" src="${VCA_LOGO_DATA_URL}" alt="Company Logo" style="max-height:70px; max-width:140px; object-fit:contain; display:block;" />`;
+    let logoHtml = `<img class="inv-logo" src="${VCA_LOGO_DATA_URL}" alt="Company Logo" style="max-height:60px; max-width:130px; object-fit:contain; display:block;" />`;
 
     if (rawLogo && rawLogo !== DEFAULT_LOGO_DATA_URL) {
       if (rawLogo.startsWith('<svg')) {
         logoHtml = rawLogo;
       } else if (rawLogo.startsWith('data:image/') || rawLogo.startsWith('http://') || rawLogo.startsWith('https://') || rawLogo.startsWith('blob:')) {
         const safeSrc = rawLogo.replace(/"/g, '&quot;');
-        logoHtml = `<img class="inv-logo" src="${safeSrc}" alt="Company Logo" style="max-height:70px; max-width:140px; object-fit:contain; display:block;" />`;
+        logoHtml = `<img class="inv-logo" src="${safeSrc}" alt="Company Logo" style="max-height:60px; max-width:130px; object-fit:contain; display:block;" />`;
       }
     }
 
@@ -744,119 +745,119 @@ export default function App() {
     const printContainer = document.getElementById('printInvoice');
     if (printContainer) {
       printContainer.innerHTML = `
-      <div class="inv-box"><div class="inv-box-inner" style="border:1.5px solid #0f172a; padding:16px 18px; background:#fff; color:#0f172a; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; min-height:262mm; display:flex; flex-direction:column; justify-content:space-between; box-sizing:border-box;">
-        <div style="flex:1;">
-          <div class="inv-head" style="border-bottom:1.5px solid #0f172a; padding-bottom:10px; margin-bottom:12px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; font-size:11.5px; font-weight:bold; margin-bottom:8px;">
-              <span style="text-transform:uppercase; letter-spacing:1px; color:#0f172a; font-size:13px; font-weight:900;">${isSale ? (isSalesBill2 ? 'NON-GST INVOICE' : 'TAX INVOICE') : 'PURCHASE BILL'}</span>
-              <span style="border:1.5px solid #0f172a; padding:3px 10px; border-radius:3px; font-family:monospace; background:#f8fafc; font-size:11px; font-weight:bold; color:#0f172a;">${copyTag}</span>
+      <div class="inv-box"><div class="inv-box-inner" style="border:1.5px solid #0f172a; padding:12px 15px; background:#fff; color:#0f172a; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; box-sizing:border-box;">
+        <div>
+          <div class="inv-head" style="border-bottom:1.5px solid #0f172a; padding-bottom:8px; margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:bold; margin-bottom:6px;">
+              <span style="text-transform:uppercase; letter-spacing:1px; color:#0f172a; font-size:13.5px; font-weight:900;">${isSale ? (isSalesBill2 ? 'NON-GST INVOICE' : 'TAX INVOICE') : 'PURCHASE BILL'}</span>
+              <span style="border:1.5px solid #0f172a; padding:2px 8px; border-radius:3px; font-family:monospace; background:#f8fafc; font-size:11px; font-weight:bold; color:#0f172a;">${copyTag}</span>
             </div>
             <div class="inv-headrow" style="display:flex; justify-content:space-between; align-items:center;">
-              <div style="width:140px; display:flex; justify-content:flex-start; align-items:center;">
+              <div style="width:130px; display:flex; justify-content:flex-start; align-items:center;">
                 ${logoHtml}
               </div>
               <div class="inv-headtext" style="text-align:center; flex:1; padding:0 10px;">
-                <div class="inv-company" style="font-size:25px; font-weight:900; color:#0f172a; letter-spacing:-0.3px; line-height:1.1; margin:0;">${escHtml(companyName)}</div>
-                <div style="font-size:11px; color:#334155; font-weight:600; margin-top:2px;">${escHtml(companyAddress)}</div>
-                <div class="inv-gstline" style="font-size:12px; font-weight:800; margin-top:3px;">${companyGstin ? 'GSTIN: ' + escHtml(companyGstin) : ''}${companyPhone ? (companyGstin ? ' &nbsp;|&nbsp; ' : '') + 'Ph: ' + escHtml(companyPhone) : ''}</div>
+                <div class="inv-company" style="font-size:30px; font-weight:900; color:#0f172a; letter-spacing:-0.5px; line-height:1.1; margin:0; text-transform:uppercase;">${escHtml(companyName)}</div>
+                <div style="font-size:12px; color:#334155; font-weight:600; margin-top:2px;">${escHtml(companyAddress)}</div>
+                <div class="inv-gstline" style="font-size:12.5px; font-weight:800; margin-top:2px;">${companyGstin ? 'GSTIN: ' + escHtml(companyGstin) : ''}${companyPhone ? (companyGstin ? ' &nbsp;|&nbsp; ' : '') + 'Ph: ' + escHtml(companyPhone) : ''}</div>
               </div>
-              <div style="width:140px; text-align:right; font-size:11px; font-family:monospace; font-weight:bold;">
+              <div style="width:130px; text-align:right; font-size:12px; font-family:monospace; font-weight:bold;">
                 <div>Inv #: ${escHtml(ref)}</div>
                 <div>Date: ${escHtml(bill.date)}</div>
               </div>
             </div>
           </div>
 
-          <div class="inv-parties" style="display:grid; grid-template-columns:1fr 1fr; border:1.5px solid #0f172a; margin-bottom:12px; font-size:11.5px; padding:10px 12px; gap:12px;">
-            <div style="padding-right:10px; border-right:1.5px solid #0f172a;">
-              <div class="inv-sub-hd" style="font-weight:900; text-transform:uppercase; border-bottom:1px solid #0f172a; padding-bottom:4px; margin-bottom:8px; color:#0f172a; font-size:11px; letter-spacing:0.5px;">DETAILS OF RECEIVER (BILLED TO)</div>
-              <table style="width:100%; border:none; border-collapse:collapse; line-height:1.45;">
-                <tr><td style="width:75px; font-weight:bold; color:#475569;">Name</td><td style="font-weight:bold; color:#0f172a;">: ${escHtml(party)}</td></tr>
-                <tr><td style="font-weight:bold; color:#475569;">Address</td><td>: ${escHtml(cAddress || '—')}</td></tr>
-                <tr><td style="font-weight:bold; color:#475569;">State</td><td>: ${escHtml(partyState || 'Tamil Nadu')}</td></tr>
-                <tr><td style="font-weight:bold; color:#475569;">GSTIN</td><td style="font-family:monospace; font-weight:bold;">: ${isSalesBill2 || !cGstin ? '-' : escHtml(cGstin)}</td></tr>
-                <tr><td style="font-weight:bold; color:#475569;">Phone</td><td>: ${escHtml(cPhone || '—')}</td></tr>
+          <div class="inv-parties" style="display:grid; grid-template-columns:1fr 1fr; border:1.5px solid #0f172a; margin-bottom:8px; font-size:13px; padding:6px 10px; gap:10px;">
+            <div style="padding-right:8px; border-right:1.5px solid #0f172a;">
+              <div class="inv-sub-hd" style="font-weight:900; text-transform:uppercase; margin-bottom:4px; color:#0f172a; font-size:12px; letter-spacing:0.5px;">DETAILS OF RECEIVER (BILLED TO)</div>
+              <table style="width:100%; border:none; border-collapse:collapse; line-height:1.35; font-size:13px;">
+                <tr><td style="width:70px; font-weight:bold; color:#334155; padding:1.5px 0;">Name</td><td style="font-weight:bold; color:#0f172a; padding:1.5px 0;">: ${escHtml(party)}</td></tr>
+                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Address</td><td style="padding:1.5px 0;">: ${escHtml(cAddress || '—')}</td></tr>
+                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">State</td><td style="padding:1.5px 0;">: ${escHtml(partyState || 'Tamil Nadu')}</td></tr>
+                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">GSTIN</td><td style="font-family:monospace; font-weight:bold; padding:1.5px 0;">: ${isSalesBill2 || !cGstin ? '-' : escHtml(cGstin)}</td></tr>
+                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Phone</td><td style="padding:1.5px 0;">: ${escHtml(cPhone || '—')}</td></tr>
               </table>
             </div>
-            <div style="padding-left:10px;">
-              <div class="inv-sub-hd" style="font-weight:900; text-transform:uppercase; border-bottom:1px solid #0f172a; padding-bottom:4px; margin-bottom:8px; color:#0f172a; font-size:11px; letter-spacing:0.5px;">INVOICE & DISPATCH DETAILS</div>
-              <table style="width:100%; border:none; border-collapse:collapse; line-height:1.45;">
-                <tr><td style="width:115px; font-weight:bold; color:#475569;">Invoice No.</td><td style="font-family:monospace; font-weight:bold; color:#0f172a;">: ${escHtml(ref)}</td></tr>
-                <tr><td style="font-weight:bold; color:#475569;">Invoice Date</td><td style="font-family:monospace;">: ${escHtml(bill.date)}</td></tr>
-                <tr><td style="font-weight:bold; color:#475569;">Article</td><td style="font-weight:bold; color:#0f172a;">: ${escHtml(bill.articleNo || '—')}</td></tr>
-                <tr><td style="font-weight:bold; color:#475569;">Dispatched Via</td><td style="font-weight:bold; color:#0f172a;">: ${escHtml(bill.dispatchThrough || '—')}</td></tr>
-                <tr><td style="font-weight:bold; color:#475569;">Total Qty</td><td style="font-family:monospace; font-weight:bold; color:#0f172a;">: ${totalQty} ${bill.items[0]?.unit || 'Pcs'}</td></tr>
-                <tr><td style="font-weight:bold; color:#475569;">Total Weight</td><td style="font-family:monospace; font-weight:bold; color:#0f172a;">: ${totalWeightKg > 0 ? totalWeightKg.toFixed(2) + ' Kg' : '—'}</td></tr>
+            <div style="padding-left:8px;">
+              <div class="inv-sub-hd" style="font-weight:900; text-transform:uppercase; margin-bottom:4px; color:#0f172a; font-size:12px; letter-spacing:0.5px;">INVOICE & DISPATCH DETAILS</div>
+              <table style="width:100%; border:none; border-collapse:collapse; line-height:1.35; font-size:13px;">
+                <tr><td style="width:110px; font-weight:bold; color:#334155; padding:1.5px 0;">Invoice No.</td><td style="font-family:monospace; font-weight:bold; color:#0f172a; padding:1.5px 0;">: ${escHtml(ref)}</td></tr>
+                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Invoice Date</td><td style="font-family:monospace; padding:1.5px 0;">: ${escHtml(bill.date)}</td></tr>
+                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Article</td><td style="font-weight:bold; color:#0f172a; padding:1.5px 0;">: ${escHtml(bill.articleNo || '—')}</td></tr>
+                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Dispatched Via</td><td style="font-weight:bold; color:#0f172a; padding:1.5px 0;">: ${escHtml(bill.dispatchThrough || '—')}</td></tr>
+                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Total Qty</td><td style="font-family:monospace; font-weight:bold; color:#0f172a; padding:1.5px 0;">: ${totalQty} ${bill.items[0]?.unit || 'Pcs'}</td></tr>
+                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Total Weight</td><td style="font-family:monospace; font-weight:bold; color:#0f172a; padding:1.5px 0;">: ${totalWeightKg > 0 ? totalWeightKg.toFixed(2) + ' Kg' : '—'}</td></tr>
               </table>
             </div>
           </div>
 
-          <table class="inv-items" style="width:100%; border-collapse:collapse; margin-bottom:12px; border:1.5px solid #0f172a; table-layout:fixed;">
+          <table class="inv-items" style="width:100%; border-collapse:collapse; margin-bottom:8px; border:1.5px solid #0f172a; table-layout:fixed;">
             <thead>
               <tr style="background:#f1f5f9; font-size:11px; text-transform:uppercase; font-weight:800;">
-                <th style="border:1px solid #0f172a; padding:6px 3px; width:5%;">S.NO</th>
-                <th style="border:1px solid #0f172a; padding:6px 6px; width:33%; text-align:left;">DESCRIPTION OF GOODS</th>
-                <th style="border:1px solid #0f172a; padding:6px 3px; width:10%;">HSN</th>
-                <th style="border:1px solid #0f172a; padding:6px 3px; width:7%;">GST%</th>
-                <th style="border:1px solid #0f172a; padding:6px 4px; width:8%; text-align:right;">QTY</th>
-                <th style="border:1px solid #0f172a; padding:6px 3px; width:7%;">UNIT</th>
-                <th style="border:1px solid #0f172a; padding:6px 4px; width:10%; text-align:right;">RATE</th>
-                <th style="border:1px solid #0f172a; padding:6px 3px; width:7%;">DISC%</th>
-                <th style="border:1px solid #0f172a; padding:6px 6px; width:13%; text-align:right;">TAXABLE VALUE</th>
+                <th style="border:1px solid #0f172a; padding:5px 3px; width:5%;">S.NO</th>
+                <th style="border:1px solid #0f172a; padding:5px 6px; width:33%; text-align:left;">DESCRIPTION OF GOODS</th>
+                <th style="border:1px solid #0f172a; padding:5px 3px; width:10%;">HSN</th>
+                <th style="border:1px solid #0f172a; padding:5px 3px; width:7%;">GST%</th>
+                <th style="border:1px solid #0f172a; padding:5px 4px; width:8%; text-align:right;">QTY</th>
+                <th style="border:1px solid #0f172a; padding:5px 3px; width:7%;">UNIT</th>
+                <th style="border:1px solid #0f172a; padding:5px 4px; width:10%; text-align:right;">RATE</th>
+                <th style="border:1px solid #0f172a; padding:5px 3px; width:7%;">DISC%</th>
+                <th style="border:1px solid #0f172a; padding:5px 6px; width:13%; text-align:right;">TAXABLE VALUE</th>
               </tr>
             </thead>
-            <tbody style="font-size:11.5px;">${rows}</tbody>
+            <tbody style="font-size:12px;">${rows}</tbody>
           </table>
 
-          <div class="inv-bottom" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; gap:14px;">
+          <div class="inv-bottom" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; gap:12px;">
             <div style="flex:1;">
-              <div class="inv-words" style="background:#f8fafc; border:1.5px solid #0f172a; padding:6px 10px; font-size:11.5px;">
-                <b style="text-transform:uppercase; font-size:10px; color:#475569; display:block;">TOTAL INVOICE VALUE IN WORDS:</b>
+              <div class="inv-words" style="background:#f8fafc; border:1.5px solid #0f172a; padding:6px 10px; font-size:12.5px;">
+                <b style="text-transform:uppercase; font-size:10.5px; color:#475569; display:block;">TOTAL INVOICE VALUE IN WORDS:</b>
                 <span style="font-weight:bold; color:#0f172a;">${amountInWords(roundedGrand)}</span>
               </div>
             </div>
-            <div class="inv-totals" style="width:270px;">
-              <table style="width:100%; border:1.5px solid #0f172a; border-collapse:collapse; font-size:11.5px;">
-                <tr><td style="padding:4px 8px; font-weight:bold; border-bottom:1px solid #e2e8f0;">Taxable Amount</td><td style="padding:4px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.subtotal.toFixed(2)}</td></tr>
-                ${bill.cgst > 0 ? `<tr><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">CGST</td><td style="padding:4px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.cgst.toFixed(2)}</td></tr>` : ''}
-                ${bill.sgst > 0 ? `<tr><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">SGST</td><td style="padding:4px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.sgst.toFixed(2)}</td></tr>` : ''}
-                ${bill.igst > 0 ? `<tr><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">IGST</td><td style="padding:4px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.igst.toFixed(2)}</td></tr>` : ''}
-                <tr><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">Round Off</td><td style="padding:4px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">${roundOff >= 0 ? '+' : '−'}₹${Math.abs(roundOff).toFixed(2)}</td></tr>
-                <tr style="font-weight:bold; font-size:13.5px; background:#f8fafc;"><td style="padding:5px 8px; font-weight:900; border-top:1.5px solid #0f172a;">Grand Total</td><td style="padding:5px 8px; text-align:right; font-weight:900; font-family:monospace; border-top:1.5px solid #0f172a;">₹${roundedGrand.toFixed(2)}</td></tr>
+            <div class="inv-totals" style="width:260px;">
+              <table style="width:100%; border:1.5px solid #0f172a; border-collapse:collapse; font-size:12px;">
+                <tr><td style="padding:3.5px 8px; font-weight:bold; border-bottom:1px solid #e2e8f0;">Taxable Amount</td><td style="padding:3.5px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.subtotal.toFixed(2)}</td></tr>
+                ${bill.cgst > 0 ? `<tr><td style="padding:3.5px 8px; border-bottom:1px solid #e2e8f0;">CGST</td><td style="padding:3.5px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.cgst.toFixed(2)}</td></tr>` : ''}
+                ${bill.sgst > 0 ? `<tr><td style="padding:3.5px 8px; border-bottom:1px solid #e2e8f0;">SGST</td><td style="padding:3.5px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.sgst.toFixed(2)}</td></tr>` : ''}
+                ${bill.igst > 0 ? `<tr><td style="padding:3.5px 8px; border-bottom:1px solid #e2e8f0;">IGST</td><td style="padding:3.5px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.igst.toFixed(2)}</td></tr>` : ''}
+                <tr><td style="padding:3.5px 8px; border-bottom:1px solid #e2e8f0;">Round Off</td><td style="padding:3.5px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">${roundOff >= 0 ? '+' : '−'}₹${Math.abs(roundOff).toFixed(2)}</td></tr>
+                <tr style="font-weight:bold; font-size:14px; background:#f8fafc;"><td style="padding:4.5px 8px; font-weight:900; border-top:1.5px solid #0f172a;">Grand Total</td><td style="padding:4.5px 8px; text-align:right; font-weight:900; font-family:monospace; border-top:1.5px solid #0f172a;">₹${roundedGrand.toFixed(2)}</td></tr>
               </table>
             </div>
           </div>
 
-          <div class="inv-taxsummary" style="margin-bottom:10px;">
+          <div class="inv-taxsummary" style="margin-bottom:8px;">
             ${
               isSalesBill2
-                ? `<div style="border:1.5px solid #0f172a; padding:6px 12px; font-size:11px; font-weight:bold; color:#334155; text-align:center; background:#f8fafc; letter-spacing:0.5px;">
+                ? `<div style="border:1.5px solid #0f172a; padding:5px 12px; font-size:11.5px; font-weight:bold; color:#334155; text-align:center; background:#f8fafc; letter-spacing:0.5px;">
                 SALES BILL 2 (NON-GST ESTIMATE) — NO TAX CHARGED
               </div>`
-                : `<table style="width:100%; border-collapse:collapse; border:1.5px solid #0f172a; font-size:10.5px; text-align:center;">
+                : `<table style="width:100%; border-collapse:collapse; border:1.5px solid #0f172a; font-size:11px; text-align:center;">
               <thead>
                 <tr style="background:#f1f5f9; text-transform:uppercase; font-weight:800;">
-                  <th style="border:1px solid #0f172a; padding:4px 5px;">HSN/SAC</th>
-                  <th style="border:1px solid #0f172a; padding:4px 5px; text-align:right;">TAXABLE VALUE</th>
-                  <th style="border:1px solid #0f172a; padding:4px 5px;">CGST RATE</th>
-                  <th style="border:1px solid #0f172a; padding:4px 5px; text-align:right;">CGST AMT</th>
-                  <th style="border:1px solid #0f172a; padding:4px 5px;">SGST RATE</th>
-                  <th style="border:1px solid #0f172a; padding:4px 5px; text-align:right;">SGST AMT</th>
-                  <th style="border:1px solid #0f172a; padding:4px 5px;">IGST RATE</th>
-                  <th style="border:1px solid #0f172a; padding:4px 5px; text-align:right;">IGST AMT</th>
+                  <th style="border:1px solid #0f172a; padding:3px 5px;">HSN/SAC</th>
+                  <th style="border:1px solid #0f172a; padding:3px 5px; text-align:right;">TAXABLE VALUE</th>
+                  <th style="border:1px solid #0f172a; padding:3px 5px;">CGST RATE</th>
+                  <th style="border:1px solid #0f172a; padding:3px 5px; text-align:right;">CGST AMT</th>
+                  <th style="border:1px solid #0f172a; padding:3px 5px;">SGST RATE</th>
+                  <th style="border:1px solid #0f172a; padding:3px 5px; text-align:right;">SGST AMT</th>
+                  <th style="border:1px solid #0f172a; padding:3px 5px;">IGST RATE</th>
+                  <th style="border:1px solid #0f172a; padding:3px 5px; text-align:right;">IGST AMT</th>
                 </tr>
               </thead>
               <tbody>
                 ${hsnRows}
                 <tr style="font-weight:700; background:#f8fafc;">
-                  <td style="border:1px solid #0f172a; padding:4px 5px; text-align:left;">Total Tax</td>
-                  <td style="border:1px solid #0f172a; padding:4px 5px; text-align:right; font-family:monospace;">${bill.subtotal.toFixed(2)}</td>
-                  <td style="border:1px solid #0f172a; padding:4px 5px;"></td>
-                  <td style="border:1px solid #0f172a; padding:4px 5px; text-align:right; font-family:monospace;">${bill.cgst.toFixed(2)}</td>
-                  <td style="border:1px solid #0f172a; padding:4px 5px;"></td>
-                  <td style="border:1px solid #0f172a; padding:4px 5px; text-align:right; font-family:monospace;">${bill.sgst.toFixed(2)}</td>
-                  <td style="border:1px solid #0f172a; padding:4px 5px;"></td>
-                  <td style="border:1px solid #0f172a; padding:4px 5px; text-align:right; font-family:monospace;">${bill.igst.toFixed(2)}</td>
+                  <td style="border:1px solid #0f172a; padding:3px 5px; text-align:left;">Total Tax</td>
+                  <td style="border:1px solid #0f172a; padding:3px 5px; text-align:right; font-family:monospace;">${bill.subtotal.toFixed(2)}</td>
+                  <td style="border:1px solid #0f172a; padding:3px 5px;"></td>
+                  <td style="border:1px solid #0f172a; padding:3px 5px; text-align:right; font-family:monospace;">${bill.cgst.toFixed(2)}</td>
+                  <td style="border:1px solid #0f172a; padding:3px 5px;"></td>
+                  <td style="border:1px solid #0f172a; padding:3px 5px; text-align:right; font-family:monospace;">${bill.sgst.toFixed(2)}</td>
+                  <td style="border:1px solid #0f172a; padding:3px 5px;"></td>
+                  <td style="border:1px solid #0f172a; padding:3px 5px; text-align:right; font-family:monospace;">${bill.igst.toFixed(2)}</td>
                 </tr>
               </tbody>
             </table>`
@@ -864,22 +865,22 @@ export default function App() {
           </div>
         </div>
 
-        <div style="display:flex; justify-content:space-between; align-items:flex-end; font-size:11.5px; margin-top:10px; padding-top:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; font-size:12px; margin-top:6px; padding-top:4px;">
           <div>
             ${
               isOriginalCopy
-                ? `<div style="color:#0f172a; font-size:10.5px; line-height:1.45; border:1px solid #e2e8f0; padding:6px 8px; background:#fafafa;">
-                    <span style="color:#1d4ed8; font-weight:bold; font-size:10px; text-transform:uppercase;">Bank Account Payment Info:</span><br>
+                ? `<div style="color:#0f172a; font-size:11px; line-height:1.4; border:1px solid #cbd5e1; padding:5px 8px; background:#fafafa;">
+                    <span style="color:#1d4ed8; font-weight:bold; font-size:10.5px; text-transform:uppercase;">Bank Account Payment Info:</span><br>
                     <b>Bank:</b> ${escHtml(companyBankName)}<br>
                     <b>A/C No:</b> <span style="font-family:monospace; font-weight:bold;">${escHtml(companyBankAccount || '—')}</span> &nbsp;|&nbsp; <b>IFSC:</b> <span style="font-family:monospace; font-weight:bold;">${escHtml(companyBankIfsc || '—')}</span>
                    </div>`
-                : `<div style="color:#64748b; font-style:italic; font-size:10px;">[ Bank details omitted for transport copy ]</div>`
+                : `<div style="color:#64748b; font-style:italic; font-size:10.5px;">[ Bank details omitted for transport copy ]</div>`
             }
           </div>
 
           <div class="inv-sign" style="text-align:right;">
-            <div style="font-weight:bold; color:#0f172a; font-size:11.5px;">For, ${escHtml(companyName)}</div>
-            <div style="margin-top:28px; border-top:1px solid #0f172a; padding-top:3px; font-weight:bold; font-size:10.5px; text-transform:uppercase; letter-spacing:0.5px; color:#1e293b;">
+            <div style="font-weight:bold; color:#0f172a; font-size:12px;">For, ${escHtml(companyName)}</div>
+            <div style="margin-top:22px; border-top:1px solid #0f172a; padding-top:3px; font-weight:bold; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#1e293b;">
               AUTHORISED SIGNATURE
             </div>
           </div>
@@ -2127,6 +2128,46 @@ export default function App() {
                       </div>
                     ))}
                   </div>
+
+                  {/* RESET & DATA PURGE FOR LIVE PRODUCTION USE */}
+                  <div className="mt-6 pt-5 border-t border-slate-200 bg-rose-50/50 p-4 rounded-xl border border-rose-200">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-bold text-rose-900 m-0 flex items-center gap-2">
+                          <Trash2 className="w-4 h-4 text-rose-600" />
+                          <span>Production Readiness & Test Data Purge</span>
+                        </h3>
+                        <p className="text-xs text-rose-700 m-0 mt-1">
+                          Going live for daily work? Clear all sample test bills, orders, quality records, customers, and dummy logs with one click. Your Company Name & Settings will be <strong>100% preserved</strong>.
+                        </p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (confirm('Are you sure you want to delete ALL test bills, orders, inventory, customers, suppliers & logs? Company profile settings will be kept intact.')) {
+                            await clearAllTestData();
+                            setCustomers([]);
+                            setSuppliers([]);
+                            setInventory([]);
+                            setSalesBills([]);
+                            setPurchaseBills([]);
+                            setPayments([]);
+                            setEmployees([]);
+                            setProductionLogs([]);
+                            setSalaryAdvances([]);
+                            setProductionOrders([]);
+                            setVarieties([]);
+                            setQualityAudits([]);
+                            setRoutineReminders([]);
+                            showToast('All test data cleared! App is ready for live production use.');
+                          }
+                        }}
+                        className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg cursor-pointer transition-colors shrink-0 shadow-xs flex items-center gap-1.5"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span>Purge All Test Data</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2258,7 +2299,7 @@ export default function App() {
                         />
                       </div>
                       <div className="text-center flex-1 px-2">
-                        <h2 className="text-xl font-black text-slate-900 m-0 leading-tight">{previewBill.companyName || settings.name || 'VCA Fabrics'}</h2>
+                        <h2 className="text-2xl sm:text-[28px] font-black text-slate-900 m-0 leading-tight uppercase tracking-tight">{previewBill.companyName || settings.name || 'VCA Fabrics'}</h2>
                         {settings.tagline && <p className="text-xs text-slate-600 italic mt-0.5">{settings.tagline}</p>}
                         <p className="text-xs text-slate-700 font-medium mt-1">{previewBill.companyAddress || settings.address}</p>
                         <p className="text-xs font-bold text-slate-900 mt-0.5">
@@ -2272,37 +2313,37 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Customer / Dispatch Details with Middle Line Separator */}
+                  {/* Customer / Dispatch Details */}
                   {(() => {
                     const { totalQty: modalTotalQty, totalWeightKg: modalTotalWeight } = calculateBillWeightAndQty(previewBill.items);
                     return (
                       <div className="border-1.5 border-slate-900 grid grid-cols-1 sm:grid-cols-2 text-xs">
-                        <div className="p-3 sm:border-r-1.5 border-slate-900">
-                          <span className="text-[10px] uppercase font-black text-slate-900 block border-b border-slate-900 pb-1 mb-2 tracking-wider">
+                        <div className="p-2.5 sm:border-r-1.5 border-slate-900">
+                          <span className="text-xs uppercase font-black text-slate-900 block mb-1.5 tracking-wider">
                             DETAILS OF RECEIVER (BILLED TO)
                           </span>
-                          <table className="w-full text-xs">
+                          <table className="w-full text-[13px]">
                             <tbody>
-                              <tr><td className="w-16 font-bold text-slate-600">Name</td><td className="font-bold text-slate-900">: {previewBill.customerName}</td></tr>
-                              <tr><td className="font-bold text-slate-600">Address</td><td className="text-slate-800">: {previewBill.customerAddress || '—'} {previewBill.customerPincode ? `(${previewBill.customerPincode})` : ''}</td></tr>
-                              <tr><td className="font-bold text-slate-600">State</td><td className="text-slate-800">: {previewBill.customerState}</td></tr>
-                              <tr><td className="font-bold text-slate-600">GSTIN</td><td className="font-mono font-bold text-slate-900">: {previewBill.billType === 'sales_bill_2' || !previewBill.customerGstin ? '-' : previewBill.customerGstin}</td></tr>
-                              <tr><td className="font-bold text-slate-600">Phone</td><td className="text-slate-800">: {previewBill.customerPhone || '—'}</td></tr>
+                              <tr><td className="w-16 font-bold text-slate-600 py-0.5">Name</td><td className="font-bold text-slate-900 py-0.5">: {previewBill.customerName}</td></tr>
+                              <tr><td className="font-bold text-slate-600 py-0.5">Address</td><td className="text-slate-800 py-0.5">: {previewBill.customerAddress || '—'} {previewBill.customerPincode ? `(${previewBill.customerPincode})` : ''}</td></tr>
+                              <tr><td className="font-bold text-slate-600 py-0.5">State</td><td className="text-slate-800 py-0.5">: {previewBill.customerState}</td></tr>
+                              <tr><td className="font-bold text-slate-600 py-0.5">GSTIN</td><td className="font-mono font-bold text-slate-900 py-0.5">: {previewBill.billType === 'sales_bill_2' || !previewBill.customerGstin ? '-' : previewBill.customerGstin}</td></tr>
+                              <tr><td className="font-bold text-slate-600 py-0.5">Phone</td><td className="text-slate-800 py-0.5">: {previewBill.customerPhone || '—'}</td></tr>
                             </tbody>
                           </table>
                         </div>
-                        <div className="p-3 border-t sm:border-t-0 border-slate-900">
-                          <span className="text-[10px] uppercase font-black text-slate-900 block border-b border-slate-900 pb-1 mb-2 tracking-wider">
+                        <div className="p-2.5 border-t sm:border-t-0 border-slate-900">
+                          <span className="text-xs uppercase font-black text-slate-900 block mb-1.5 tracking-wider">
                             INVOICE & DISPATCH DETAILS
                           </span>
-                          <table className="w-full text-xs">
+                          <table className="w-full text-[13px]">
                             <tbody>
-                              <tr><td className="w-28 font-bold text-slate-600">Invoice No.</td><td className="font-mono font-bold text-slate-900">: {previewBill.billNo}</td></tr>
-                              <tr><td className="font-bold text-slate-600">Invoice Date</td><td className="font-mono text-slate-800">: {previewBill.date}</td></tr>
-                              <tr><td className="font-bold text-slate-600">Article</td><td className="font-bold text-slate-900">: {previewBill.articleNo || '—'}</td></tr>
-                              <tr><td className="font-bold text-slate-600">Dispatched Via</td><td className="font-bold text-slate-900">: {previewBill.dispatchThrough || '—'}</td></tr>
-                              <tr><td className="font-bold text-slate-600">Total Qty</td><td className="font-mono font-bold text-slate-900">: {modalTotalQty} {previewBill.items[0]?.unit || 'Pcs'}</td></tr>
-                              <tr><td className="font-bold text-slate-600">Total Weight</td><td className="font-mono font-bold text-slate-900">: {modalTotalWeight > 0 ? modalTotalWeight.toFixed(2) + ' Kg' : '—'}</td></tr>
+                              <tr><td className="w-28 font-bold text-slate-600 py-0.5">Invoice No.</td><td className="font-mono font-bold text-slate-900 py-0.5">: {previewBill.billNo}</td></tr>
+                              <tr><td className="font-bold text-slate-600 py-0.5">Invoice Date</td><td className="font-mono text-slate-800 py-0.5">: {previewBill.date}</td></tr>
+                              <tr><td className="font-bold text-slate-600 py-0.5">Article</td><td className="font-bold text-slate-900 py-0.5">: {previewBill.articleNo || '—'}</td></tr>
+                              <tr><td className="font-bold text-slate-600 py-0.5">Dispatched Via</td><td className="font-bold text-slate-900 py-0.5">: {previewBill.dispatchThrough || '—'}</td></tr>
+                              <tr><td className="font-bold text-slate-600 py-0.5">Total Qty</td><td className="font-mono font-bold text-slate-900 py-0.5">: {modalTotalQty} {previewBill.items[0]?.unit || 'Pcs'}</td></tr>
+                              <tr><td className="font-bold text-slate-600 py-0.5">Total Weight</td><td className="font-mono font-bold text-slate-900 py-0.5">: {modalTotalWeight > 0 ? modalTotalWeight.toFixed(2) + ' Kg' : '—'}</td></tr>
                             </tbody>
                           </table>
                         </div>
@@ -2310,40 +2351,40 @@ export default function App() {
                     );
                   })()}
 
-                  {/* Items Table with Item Lines and Empty Filler Space */}
+                  {/* Items Table with Item Lines */}
                   <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse border-1.5 border-slate-900 text-xs">
                       <thead>
-                        <tr className="bg-slate-100 text-slate-900 font-extrabold uppercase text-[10px] border-b-1.5 border-slate-900">
-                          <th className="p-2 border-r border-slate-900 w-8 text-center">#</th>
-                          <th className="p-2 border-r border-slate-900">DESCRIPTION OF GOODS</th>
-                          <th className="p-2 border-r border-slate-900 text-center w-16">HSN</th>
-                          <th className="p-2 border-r border-slate-900 text-center w-14">GST%</th>
-                          <th className="p-2 border-r border-slate-900 text-right w-16">QTY</th>
-                          <th className="p-2 border-r border-slate-900 text-center w-12">UNIT</th>
-                          <th className="p-2 border-r border-slate-900 text-right w-20">RATE (₹)</th>
-                          <th className="p-2 border-r border-slate-900 text-center w-14">DISC%</th>
-                          <th className="p-2 text-right w-28">TAXABLE VALUE</th>
+                        <tr className="bg-slate-100 text-slate-900 font-extrabold uppercase text-[11px] border-b-1.5 border-slate-900">
+                          <th className="p-1.5 border-r border-slate-900 w-8 text-center">#</th>
+                          <th className="p-1.5 border-r border-slate-900">DESCRIPTION OF GOODS</th>
+                          <th className="p-1.5 border-r border-slate-900 text-center w-16">HSN</th>
+                          <th className="p-1.5 border-r border-slate-900 text-center w-14">GST%</th>
+                          <th className="p-1.5 border-r border-slate-900 text-right w-16">QTY</th>
+                          <th className="p-1.5 border-r border-slate-900 text-center w-12">UNIT</th>
+                          <th className="p-1.5 border-r border-slate-900 text-right w-20">RATE (₹)</th>
+                          <th className="p-1.5 border-r border-slate-900 text-center w-14">DISC%</th>
+                          <th className="p-1.5 text-right w-28">TAXABLE VALUE</th>
                         </tr>
                       </thead>
-                      <tbody>
-                        {previewBill.items.map((it, idx) => (
+                      <tbody className="text-[12.5px]">
+                        {previewBill.items.slice(0, 15).map((it, idx) => (
                           <tr key={idx} className="border-b border-slate-900">
-                            <td className="p-2 border-r border-slate-900 font-mono text-center text-slate-600">{idx + 1}</td>
-                            <td className="p-2 border-r border-slate-900 font-bold text-slate-900">{it.name}</td>
-                            <td className="p-2 border-r border-slate-900 font-mono text-center text-slate-700">{it.hsn || '6304'}</td>
-                            <td className="p-2 border-r border-slate-900 font-mono text-center">{it.taxRate}%</td>
-                            <td className="p-2 border-r border-slate-900 text-right font-mono font-bold text-slate-900">{it.qty}</td>
-                            <td className="p-2 border-r border-slate-900 text-center">{it.unit || 'Pcs'}</td>
-                            <td className="p-2 border-r border-slate-900 text-right font-mono">₹{it.rate.toFixed(2)}</td>
-                            <td className="p-2 border-r border-slate-900 text-center font-mono">{it.discPct ? `${it.discPct}%` : '—'}</td>
-                            <td className="p-2 text-right font-mono font-bold text-slate-900">₹{it.taxable.toFixed(2)}</td>
+                            <td className="p-1.5 border-r border-slate-900 font-mono text-center text-slate-600">{idx + 1}</td>
+                            <td className="p-1.5 border-r border-slate-900 font-bold text-slate-900">{it.name}</td>
+                            <td className="p-1.5 border-r border-slate-900 font-mono text-center text-slate-700">{it.hsn || '6304'}</td>
+                            <td className="p-1.5 border-r border-slate-900 font-mono text-center">{it.taxRate}%</td>
+                            <td className="p-1.5 border-r border-slate-900 text-right font-mono font-bold text-slate-900">{it.qty}</td>
+                            <td className="p-1.5 border-r border-slate-900 text-center">{it.unit || 'Pcs'}</td>
+                            <td className="p-1.5 border-r border-slate-900 text-right font-mono">₹{it.rate.toFixed(2)}</td>
+                            <td className="p-1.5 border-r border-slate-900 text-center font-mono">{it.discPct ? `${it.discPct}%` : '—'}</td>
+                            <td className="p-1.5 text-right font-mono font-bold text-slate-900">₹{it.taxable.toFixed(2)}</td>
                           </tr>
                         ))}
                         {/* Blank Space Filler Row if less than 8 items */}
                         {previewBill.items.length < 8 && (
                           <tr>
-                            <td style={{ height: `${Math.max(40, 180 - previewBill.items.length * 24)}px` }} className="border-r border-slate-900"></td>
+                            <td style={{ height: `${Math.max(25, 140 - previewBill.items.length * 20)}px` }} className="border-r border-slate-900"></td>
                             <td className="border-r border-slate-900"></td>
                             <td className="border-r border-slate-900"></td>
                             <td className="border-r border-slate-900"></td>
