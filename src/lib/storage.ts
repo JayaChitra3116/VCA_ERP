@@ -70,10 +70,6 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
     }
   } catch (e) {}
 
-  // Preserve an existing device copy. This prevents an empty or stale cloud row
-  // from erasing recovery data before it has been uploaded.
-  if (hasLocalData) return localVal;
-
   const client = getSupabaseClient();
   if (getIsSupabaseConfigured() && client) {
     try {
@@ -329,7 +325,7 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
             cgst: Number(b.cgst) || 0,
             sgst: Number(b.sgst) || 0,
             igst: Number(b.igst) || 0,
-            grand_total: Number(b.grand) || Number(b.grandTotal) || 0,
+            grand: Number(b.grand) || Number(b.grandTotal) || 0,
             status: (b.status === 'paid' || b.status === 'unpaid') ? b.status : 'unpaid',
             items: b.items || []
           }));
@@ -493,10 +489,6 @@ export async function globalGet<T>(key: string, fallback: T): Promise<T> {
       hasLocalData = true;
     }
   } catch (e) {}
-
-  // Preserve an existing device copy. This prevents an empty or stale cloud row
-  // from erasing recovery data before it has been uploaded.
-  if (hasLocalData) return localVal;
 
   const client = getSupabaseClient();
   if (getIsSupabaseConfigured() && client) {
