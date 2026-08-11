@@ -1,0 +1,592 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    background-color: #f5f2ea;
+    color: #182228;
+    font-size: 14px;
+    line-height: 1.6;
+    font-family: 'Space Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  h1, h2, h3, h4, h5, h6, .font-serif {
+    font-family: 'Playfair Display', Georgia, Cambria, "Times New Roman", Times, serif !important;
+  }
+}
+
+/* Remove spin buttons and prevent scroll wheel increment on number inputs */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
+/* Custom Senior-Friendly Vintage Cream & Slate ERP Theme Utilities */
+
+/* Panels & Cards */
+.panel {
+  background-color: #faf8f3;
+  border: 1px solid #e2dcd0;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04);
+  padding: 1.5rem;
+  margin-bottom: 1.75rem;
+}
+
+.panel h2, .panel h3 {
+  font-family: 'Playfair Display', Georgia, Cambria, "Times New Roman", Times, serif;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #182228;
+  margin-bottom: 1.25rem;
+}
+
+/* Dashboard Stat Cards */
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 1.75rem;
+}
+
+.stat {
+  background-color: #ffffff;
+  border: 1.5px solid #dfd8c8;
+  border-radius: 0.5rem;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+}
+
+.stat .lbl {
+  font-family: 'Space Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: #4A5C6C;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.stat .val {
+  font-size: 2rem;
+  font-weight: 800;
+  color: #182228;
+  font-family: 'Playfair Display', Georgia, Cambria, "Times New Roman", Times, serif;
+}
+
+/* Senior-Friendly Touch & Readable Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 0.375rem;
+  transition: all 0.15s ease-in-out;
+  cursor: pointer;
+  border: 1.5px solid #d0c8b8;
+  background-color: #ffffff;
+  color: #182228;
+}
+
+.btn:hover {
+  background-color: #efece6;
+  border-color: #a8a090;
+}
+
+.btn.primary {
+  background-color: #182228;
+  color: #ffffff;
+  border-color: #182228;
+}
+
+.btn.primary:hover {
+  background-color: #0d1419;
+  border-color: #0d1419;
+}
+
+.btn.full {
+  width: 100%;
+}
+
+.link-btn {
+  color: #3b5062;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+  font-size: 0.875rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+  color: #182228;
+}
+
+/* Form Layout Rows & High-Readability Inputs */
+.row2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.row3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+input, select, textarea {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  border: 1.5px solid #d0c8b8;
+  border-radius: 0.375rem;
+  background-color: #f7f4ed;
+  color: #182228;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  outline: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: #8b5e1e;
+  background-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(139, 94, 30, 0.2);
+}
+
+label {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: #405262;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.375rem;
+}
+
+/* Status Pills & Badges */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.pill.paid, .pill.ok {
+  background-color: #d1fae5;
+  color: #046c4e;
+  border: 1px solid #a7f3d0;
+}
+
+.pill.unpaid, .pill.low {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.pill.due, .pill.warning {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+.pill.purchase {
+  background-color: #e0e7ff;
+  color: #312e81;
+  border: 1px solid #c7d2fe;
+}
+
+/* High-Legibility Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.9375rem;
+}
+
+th {
+  padding: 0.875rem 1rem;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: #405262;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background-color: #eae4d6;
+  border-bottom: 1.5px solid #d0c8b8;
+}
+
+td {
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid #e5dfd2;
+  color: #182228;
+}
+
+tr:hover td {
+  background-color: #efece4;
+}
+
+td.num, th.num {
+  text-align: right;
+}
+
+/* Modals */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem;
+  z-index: 50;
+  overflow-y: auto;
+}
+
+.modal {
+  background-color: #ffffff;
+  border-radius: 1rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  width: 100%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+  margin: auto;
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  background-color: #0f172a;
+  color: #ffffff;
+  border-bottom: 1px solid #1e293b;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.modal-head h2 {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #ffffff !important;
+  margin: 0;
+}
+
+.close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.5rem;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 1.25rem;
+  cursor: pointer;
+  line-height: 1;
+  transition: all 0.15s ease-in-out;
+  flex-shrink: 0;
+}
+
+.close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  background-color: #0f172a;
+  color: #ffffff;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  font-size: 0.875rem;
+  font-weight: 500;
+  z-index: 60;
+}
+
+/* Print Invoice Styles - Single Page A4 Compact Format */
+#printInvoice {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 15mm 10mm 12mm 10mm;
+  }
+  
+  html, body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.3 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  #printInvoice, #printInvoice * {
+    visibility: visible !important;
+  }
+
+  #printInvoice {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    page-break-inside: avoid !important;
+    page-break-before: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  #printInvoice img,
+  #printInvoice svg,
+  .inv-logo {
+    display: block !important;
+    visibility: visible !important;
+    max-height: 60px !important;
+    max-width: 130px !important;
+    object-fit: contain !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #printInvoice table {
+    page-break-inside: avoid !important;
+  }
+
+  #printInvoice tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+  }
+}
+
+.inv-box {
+  background: white;
+  padding: 0;
+  max-width: 100%;
+  margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #0f172a;
+  box-sizing: border-box;
+}
+
+.inv-box-inner {
+  border: 1.5px solid #0f172a;
+  padding: 16px 18px;
+  background: #ffffff;
+  color: #0f172a;
+  box-sizing: border-box;
+  min-height: 262mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.inv-head {
+  border-bottom: 1.5px solid #0f172a;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+}
+
+.inv-headrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.inv-headtext {
+  text-align: center;
+  flex: 1;
+}
+
+.inv-title-top {
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #0f172a;
+}
+
+.inv-company {
+  font-size: 25px;
+  font-weight: 900;
+  color: #0f172a;
+  letter-spacing: -0.3px;
+  line-height: 1.1;
+  margin: 2px 0;
+}
+
+.inv-tagline {
+  font-size: 11px;
+  color: #475569;
+  font-style: italic;
+}
+
+.inv-gstline {
+  font-size: 12px;
+  font-weight: 800;
+  color: #0f172a;
+  margin-top: 3px;
+}
+
+.inv-parties {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  border: 1.5px solid #0f172a;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 11.5px;
+  background: #ffffff;
+}
+
+.inv-sub-hd {
+  font-weight: 900;
+  text-transform: uppercase;
+  color: #0f172a;
+  border-bottom: 1px solid #0f172a;
+  margin-bottom: 6px;
+  padding-bottom: 3px;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+.inv-items {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 10px;
+  border: 1.5px solid #0f172a;
+  table-layout: fixed;
+}
+
+.inv-items th {
+  background: #f1f5f9;
+  color: #0f172a;
+  border: 1px solid #0f172a;
+  padding: 6px 5px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.inv-items td {
+  border: 1px solid #cbd5e1;
+  padding: 5px 6px;
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+
+.inv-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 10px;
+  font-size: 11.5px;
+}
+
+.inv-totals table {
+  width: 270px;
+  border-collapse: collapse;
+  border: 1.5px solid #0f172a;
+  font-size: 11.5px;
+}
+
+.inv-totals td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.inv-totals .grand {
+  font-weight: 900;
+  font-size: 13.5px;
+  background: #f8fafc;
+  border-top: 1.5px solid #0f172a;
+  color: #0f172a;
+}
+
+.inv-words {
+  background: #f8fafc;
+  border: 1.5px solid #0f172a;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  margin-bottom: 10px;
+}
+
+.inv-taxsummary table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1.5px solid #0f172a;
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.inv-taxsummary th {
+  background: #f1f5f9;
+  border: 1px solid #0f172a;
+  padding: 4px 5px;
+  font-weight: 800;
+}
+
+.inv-taxsummary td {
+  border: 1px solid #cbd5e1;
+  padding: 3.5px 5px;
+}
+
+.inv-sign {
+  margin-top: 12px;
+  text-align: right;
+  font-size: 11.5px;
+}
+
+.inv-sign .line {
+  margin-top: 32px;
+  border-top: 1px solid #0f172a;
+  padding-top: 3px;
+  font-weight: 800;
+  font-size: 10.5px;
+  letter-spacing: 0.5px;
+}

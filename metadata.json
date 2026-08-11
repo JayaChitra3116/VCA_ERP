@@ -1,0 +1,6 @@
+{
+  "name": "VCA Fabrics ERP & Loom Quality Control",
+  "description": "Textile ERP with Sales & Purchase Billing, Customer Ledger, Inventory, Daily Loom Production, Machine Variety & Operator Tracking, Towel Sizing & Quality Audits, Routine Task Reminders, and Supabase integration.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
