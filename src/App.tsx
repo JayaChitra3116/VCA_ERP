@@ -893,16 +893,36 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F5F2EA] text-[#182228] font-sans">
-      {/* PREVIEW MODE TOP BANNER */}
-      <div id="previewBanner" className="bg-[#9A6B29] text-white font-mono text-[11.5px] px-4 py-2 flex justify-between items-center flex-wrap gap-2 shadow-xs">
-        <span className="tracking-wide">
-          PREVIEW MODE — data is separated per company on this device. Connect Supabase before live multi-user use.
+      {/* LIVE CLOUD & PWA TOP BANNER */}
+      <div id="previewBanner" className="bg-[#1e293b] text-white font-mono text-[11.5px] px-4 py-2 flex justify-between items-center flex-wrap gap-2 shadow-xs border-b border-slate-700">
+        <span className="tracking-wide flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0"></span>
+          <span className="font-bold text-emerald-300">LIVE CLOUD APP</span>
+          <span className="text-slate-300">| Accessible globally on Phone, Tablet & PC. Tap "Install App" to add to home screen!</span>
         </span>
         <div className="flex items-center gap-2">
+          {deferredPrompt ? (
+            <button
+              onClick={() => handleTriggerInstall()}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1 rounded-md font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Install Mobile / Desktop App</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowSecurityModal(true)}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-2.5 py-1 rounded-md font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Install App & Security</span>
+            </button>
+          )}
+
           {appPin && (
             <button
               onClick={() => setIsAppLocked(true)}
-              className="bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 text-xs px-2.5 py-0.5 rounded border border-emerald-700/60 flex items-center gap-1.5 cursor-pointer font-mono font-bold transition-colors"
+              className="bg-slate-800 hover:bg-slate-700 text-emerald-300 text-xs px-2.5 py-1 rounded-md border border-slate-600 flex items-center gap-1.5 cursor-pointer font-mono font-bold transition-colors"
               title="Lock App Screen Immediately"
             >
               <Lock className="w-3.5 h-3.5 text-emerald-400" />
@@ -911,20 +931,11 @@ export default function App() {
           )}
 
           <button
-            onClick={() => setShowSecurityModal(true)}
-            className="bg-[#7F561D] hover:bg-[#684515] text-white text-xs px-2.5 py-0.5 rounded border border-[#B5823B] flex items-center gap-1.5 cursor-pointer font-mono font-bold transition-colors"
-          >
-            <Shield className="w-3.5 h-3.5" />
-            <span>Install PWA & Security</span>
-            {deferredPrompt && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>}
-          </button>
-
-          <button
             onClick={() => setShowSupabaseModal(true)}
-            className="bg-[#7F561D] hover:bg-[#684515] text-white text-xs px-2.5 py-0.5 rounded border border-[#B5823B] flex items-center gap-1.5 cursor-pointer font-mono transition-colors"
+            className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-2.5 py-1 rounded-md border border-slate-600 flex items-center gap-1.5 cursor-pointer font-mono transition-colors"
           >
-            <Database className="w-3.5 h-3.5" />
-            <span>Status: {supabaseStatus?.connected ? 'Cloud Connected' : 'Local Sandbox'}</span>
+            <Database className="w-3.5 h-3.5 text-indigo-400" />
+            <span>{supabaseStatus?.connected ? 'Cloud Storage' : 'Local Storage'}</span>
           </button>
         </div>
       </div>
@@ -940,6 +951,7 @@ export default function App() {
         </button>
 
         <div className="flex items-center gap-2">
+          <img src={settings.logo || VCA_LOGO_DATA_URL} alt="Logo" className="w-7 h-7 object-contain shrink-0" />
           <span className="font-serif font-bold text-[#182228] text-lg tracking-tight">{settings.name || 'VCA Fabrics'}</span>
         </div>
 
@@ -971,13 +983,16 @@ export default function App() {
           }`}
         >
           <div>
-            <div className="p-3.5 mb-4 border-b border-[#D0C8B8] pb-4 bg-[#FAF8F3] rounded border border-[#E2DCD0]">
-              <span className="text-2xl font-serif font-bold tracking-tight text-[#182228] block truncate">
-                {settings.name || 'VCA Fabrics'}
-              </span>
-              <span className="text-xs font-mono font-extrabold text-[#8B5E1E] tracking-wider uppercase block truncate mt-1">
-                ERP MANAGEMENT
-              </span>
+            <div className="p-3 mb-4 border-b border-[#D0C8B8] bg-[#FAF8F3] rounded-lg border border-[#E2DCD0] flex items-center gap-3 shadow-2xs">
+              <img src={settings.logo || VCA_LOGO_DATA_URL} alt="Logo" className="w-10 h-10 object-contain shrink-0" />
+              <div className="overflow-hidden">
+                <span className="text-xl font-serif font-bold tracking-tight text-[#182228] block truncate">
+                  {settings.name || 'VCA Fabrics'}
+                </span>
+                <span className="text-[10px] font-mono font-extrabold text-[#8B5E1E] tracking-wider uppercase block truncate mt-0.5">
+                  ERP MANAGEMENT
+                </span>
+              </div>
             </div>
 
             <div className="space-y-1.5">
@@ -1003,11 +1018,37 @@ export default function App() {
                 );
               })}
             </div>
+
+            {/* PWA Direct Install Button in Sidebar */}
+            <div className="mt-4 pt-3 border-t border-[#D0C8B8]">
+              <button
+                onClick={() => {
+                  if (deferredPrompt) {
+                    handleTriggerInstall();
+                  } else {
+                    setShowSecurityModal(true);
+                  }
+                }}
+                className="w-full bg-[#8B5E1E] hover:bg-[#724c16] text-white p-3 rounded-lg font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors"
+              >
+                <Smartphone className="w-4 h-4 text-amber-200" />
+                <span>📲 Install Mobile App (PWA)</span>
+              </button>
+            </div>
           </div>
 
-          <div className="pt-4 mt-6 border-t border-[#D0C8B8] text-xs font-bold text-[#4A5C6C] flex items-center gap-2.5 font-mono">
-            <div className={`w-2.5 h-2.5 rounded-full ${supabaseStatus?.connected ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'}`}></div>
-            <span>{supabaseStatus?.connected ? 'Supabase Connected' : 'Local Storage Sandbox'}</span>
+          <div className="pt-4 mt-6 border-t border-[#D0C8B8] text-xs font-bold text-[#4A5C6C] flex items-center justify-between font-mono">
+            <div className="flex items-center gap-2">
+              <div className={`w-2.5 h-2.5 rounded-full ${supabaseStatus?.connected ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'}`}></div>
+              <span>{supabaseStatus?.connected ? 'Supabase Sync' : 'Local Storage'}</span>
+            </div>
+            <button
+              onClick={() => setShowSecurityModal(true)}
+              className="p-1 hover:text-[#182228] transition-colors cursor-pointer"
+              title="Security & Lock Settings"
+            >
+              <Shield className="w-4 h-4" />
+            </button>
           </div>
         </nav>
 
@@ -1845,6 +1886,52 @@ export default function App() {
                     <span>Main Business Profile</span>
                   </h2>
                   <div className="space-y-3 text-xs">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Brand Logo Emblem</label>
+                      <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                        <img 
+                          src={settings.logo || VCA_LOGO_DATA_URL} 
+                          alt="Logo" 
+                          className="w-12 h-12 object-contain bg-white rounded border border-slate-200 p-1 shrink-0" 
+                        />
+                        <div className="flex-1 space-y-1">
+                          <label className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold px-2.5 py-1 rounded text-[11px] cursor-pointer inline-block border border-indigo-200 transition-colors">
+                            <span>Upload Logo Image</span>
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              className="hidden" 
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onload = (ev) => {
+                                    if (ev.target?.result) {
+                                      setSettings({ ...settings, logo: ev.target.result as string });
+                                      showToast('Custom logo uploaded!');
+                                    }
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }} 
+                            />
+                          </label>
+                          {settings.logo && settings.logo !== VCA_LOGO_DATA_URL && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSettings({ ...settings, logo: VCA_LOGO_DATA_URL });
+                                showToast('Reset to default Cotton Emblem Logo');
+                              }}
+                              className="text-[11px] text-rose-600 hover:underline font-semibold block cursor-pointer"
+                            >
+                              Reset to Default Cotton Symbol Logo
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
                     <div>
                       <label className="block font-bold text-slate-700 mb-1">Company Name</label>
                       <input
