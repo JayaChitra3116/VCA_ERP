@@ -323,14 +323,18 @@ export default function App() {
       const syncRes = await forceSyncAllDataToCloud();
 
       if (!silent) {
-        if (syncRes.syncedKeys > 0) {
-          showToast(`✅ Synced ${syncRes.syncedKeys} data tables to Supabase Cloud!`);
+        if (!supCheck.connected) {
+          showToast(`⚠️ Supabase disconnected: ${supCheck.message}`);
+        } else if (syncRes.error) {
+          showToast(`⚠️ Refreshed, but sync warning: ${syncRes.error}`);
+        } else if (syncRes.syncedKeys > 0) {
+          showToast(`✅ Synced & Updated ${syncRes.syncedKeys} tables with Supabase Cloud!`);
         } else {
-          showToast('✅ Data refreshed with Cloud!');
+          showToast('✅ All data synced with Supabase Cloud!');
         }
       }
-    } catch (err) {
-      if (!silent) showToast('Data refresh completed');
+    } catch (err: any) {
+      if (!silent) showToast(`Sync warning: ${err?.message || 'Data refresh completed'}`);
     } finally {
       if (!silent) setIsRefreshing(false);
     }

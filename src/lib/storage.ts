@@ -21,13 +21,15 @@ import { VCA_LOGO_DATA_URL } from '../assets/vcaLogoData';
 const STORE_PREFIX = 'vcaPreview:';
 const GLOBAL_STORE_PREFIX = STORE_PREFIX + 'global:';
 
-let activeCompanyId = 'vca-fabrics';
+let activeCompanyId = 'comp-vca';
 
 export function getActiveCompanyId(): string {
   try {
-    return localStorage.getItem(GLOBAL_STORE_PREFIX + 'activeCompanyId') || 'vca-fabrics';
+    const saved = localStorage.getItem(GLOBAL_STORE_PREFIX + 'activeCompanyId');
+    if (saved && saved !== 'vca-fabrics') return saved;
+    return 'comp-vca';
   } catch {
-    return 'vca-fabrics';
+    return 'comp-vca';
   }
 }
 
@@ -130,12 +132,16 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
   if (getIsSupabaseConfigured() && client) {
     try {
       const companyId = getActiveCompanyId();
-      await client.from('app_state').upsert({
+      const { error: appStateErr } = await client.from('app_state').upsert({
         company_id: companyId,
         store_key: key,
         payload: val,
         updated_at: new Date().toISOString()
-      });
+      }, { onConflict: 'company_id,store_key' });
+
+      if (appStateErr) {
+        console.warn(`storeSet app_state upsert error for ${key}:`, appStateErr.message);
+      }
 
       // Also mirror to dedicated relational table if available
       if (key === 'salesBills' && Array.isArray(val)) {
@@ -157,7 +163,7 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
           status: b.status || 'pending',
           items: b.items || []
         }));
-        await client.from('sales_bills').upsert(rows);
+        await client.from('sales_bills').upsert(rows, { onConflict: 'id' });
       } else if (key === 'customers' && Array.isArray(val)) {
         const rows = val.map((c: any) => ({
           id: c.id || `cust_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -170,7 +176,7 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
           pincode: c.pincode || null,
           balance: 0
         }));
-        await client.from('customers').upsert(rows);
+        await client.from('customers').upsert(rows, { onConflict: 'id' });
       } else if (key === 'suppliers' && Array.isArray(val)) {
         const rows = val.map((s: any) => ({
           id: s.id || `supp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -181,7 +187,7 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
           address: s.address || null,
           balance: 0
         }));
-        await client.from('suppliers').upsert(rows);
+        await client.from('suppliers').upsert(rows, { onConflict: 'id' });
       } else if (key === 'inventory' && Array.isArray(val)) {
         const rows = val.map((item: any) => ({
           id: item.id || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -192,7 +198,7 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
           qty: item.qty || 0,
           reorder_level: item.reorderLevel || 0
         }));
-        await client.from('inventory').upsert(rows);
+        await client.from('inventory').upsert(rows, { onConflict: 'id' });
       } else if (key === 'employees' && Array.isArray(val)) {
         const rows = val.map((e: any) => ({
           id: e.id || `emp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -202,7 +208,7 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
           machine: e.machine || null,
           salary: e.salary || 0
         }));
-        await client.from('employees').upsert(rows);
+        await client.from('employees').upsert(rows, { onConflict: 'id' });
       }
     } catch (e) {
       console.warn('Real-time Supabase sync warning:', e);
@@ -258,7 +264,7 @@ export async function globalSet<T>(key: string, val: T): Promise<void> {
         store_key: key,
         payload: val,
         updated_at: new Date().toISOString()
-      });
+      }, { onConflict: 'company_id,store_key' });
     } catch (e) {}
   }
 }
@@ -288,6 +294,8 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
   ];
 
   let syncedCount = 0;
+  let lastError: string | undefined = undefined;
+
   for (const key of keysToSync) {
     try {
       const localRaw = localStorage.getItem(scopedKey(key));
@@ -306,12 +314,13 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
         store_key: key,
         payload: val,
         updated_at: new Date().toISOString()
-      });
+      }, { onConflict: 'company_id,store_key' });
 
       if (!appStateErr) {
         syncedCount++;
       } else {
-        console.warn(`Upsert warning for key ${key} on app_state:`, appStateErr);
+        lastError = appStateErr.message;
+        console.warn(`Upsert warning for key ${key} on app_state:`, appStateErr.message);
       }
 
       // 2. Sync to relational table if array with items
@@ -334,7 +343,7 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
           status: b.status || 'pending',
           items: b.items || []
         }));
-        await client.from('sales_bills').upsert(rows);
+        await client.from('sales_bills').upsert(rows, { onConflict: 'id' });
       } else if (key === 'customers' && Array.isArray(val) && val.length > 0) {
         const rows = val.map((c: Customer) => ({
           id: c.id || `cust_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -347,7 +356,7 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
           pincode: c.pincode || null,
           balance: 0
         }));
-        await client.from('customers').upsert(rows);
+        await client.from('customers').upsert(rows, { onConflict: 'id' });
       } else if (key === 'suppliers' && Array.isArray(val) && val.length > 0) {
         const rows = val.map((s: Supplier) => ({
           id: s.id || `supp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -358,7 +367,7 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
           address: s.address || null,
           balance: 0
         }));
-        await client.from('suppliers').upsert(rows);
+        await client.from('suppliers').upsert(rows, { onConflict: 'id' });
       } else if (key === 'inventory' && Array.isArray(val) && val.length > 0) {
         const rows = val.map((item: InventoryItem) => ({
           id: item.id || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -369,7 +378,7 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
           qty: item.qty || 0,
           reorder_level: item.reorderLevel || 0
         }));
-        await client.from('inventory').upsert(rows);
+        await client.from('inventory').upsert(rows, { onConflict: 'id' });
       } else if (key === 'employees' && Array.isArray(val) && val.length > 0) {
         const rows = val.map((e: Employee) => ({
           id: e.id || `emp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -379,9 +388,10 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
           machine: e.machine || null,
           salary: e.salary || 0
         }));
-        await client.from('employees').upsert(rows);
+        await client.from('employees').upsert(rows, { onConflict: 'id' });
       }
-    } catch (e) {
+    } catch (e: any) {
+      lastError = e?.message || String(e);
       console.error(`Error syncing key ${key}:`, e);
     }
   }
@@ -396,12 +406,12 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
         store_key: 'companies',
         payload: comps,
         updated_at: new Date().toISOString()
-      });
+      }, { onConflict: 'company_id,store_key' });
       syncedCount++;
     }
   } catch (e) {}
 
-  return { syncedKeys: syncedCount };
+  return { syncedKeys: syncedCount, error: lastError };
 }
 
 // DEFAULT INITIAL SEED DATA FOR NEW INSTALLATIONS
