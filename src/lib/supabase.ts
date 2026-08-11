@@ -75,7 +75,7 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
       configured: true,
       connected: true,
       missingTables: [],
-      message: 'Successfully connected to Supabase! All 15 required tables are verified and aligned for end-to-end function.'
+      message: `Successfully connected to Supabase! All ${EXPECTED_TABLES.length} required tables are verified and ready for cross-device sync.`
     };
   } catch (err: any) {
     return {

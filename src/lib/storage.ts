@@ -43,10 +43,14 @@ function scopedKey(key: string): string {
 }
 
 export async function storeGet<T>(key: string, fallback: T): Promise<T> {
+  let hasLocalData = false;
   let localVal = fallback;
   try {
     const value = localStorage.getItem(scopedKey(key));
-    if (value) localVal = JSON.parse(value);
+    if (value) {
+      localVal = JSON.parse(value);
+      hasLocalData = true;
+    }
   } catch (e) {}
 
   if (isSupabaseConfigured && supabase) {
@@ -64,6 +68,9 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
           localStorage.setItem(scopedKey(key), JSON.stringify(data.payload));
         } catch {}
         return data.payload as T;
+      } else if (hasLocalData) {
+        // If Supabase has no record yet for this key, push Computer A's local storage data to Supabase!
+        await storeSet(key, localVal);
       }
     } catch (e) {}
   }
@@ -93,10 +100,14 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
 }
 
 export async function globalGet<T>(key: string, fallback: T): Promise<T> {
+  let hasLocalData = false;
   let localVal = fallback;
   try {
     const value = localStorage.getItem(GLOBAL_STORE_PREFIX + key);
-    if (value) localVal = JSON.parse(value);
+    if (value) {
+      localVal = JSON.parse(value);
+      hasLocalData = true;
+    }
   } catch (e) {}
 
   if (isSupabaseConfigured && supabase) {
@@ -113,6 +124,8 @@ export async function globalGet<T>(key: string, fallback: T): Promise<T> {
           localStorage.setItem(GLOBAL_STORE_PREFIX + key, JSON.stringify(data.payload));
         } catch {}
         return data.payload as T;
+      } else if (hasLocalData) {
+        await globalSet(key, localVal);
       }
     } catch (e) {}
   }

@@ -264,6 +264,65 @@ export default function App() {
     }
   };
 
+  // Manual Refresh & Cloud Sync State
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefreshData = async () => {
+    setIsRefreshing(true);
+    showToast('🔄 Syncing and refreshing latest data from Cloud...');
+    try {
+      const supCheck = await checkSupabaseConnection();
+      setSupabaseStatus(supCheck);
+
+      const comps = await globalGet<SubsidiaryCompany[]>('companies', DEFAULT_SUBSIDIARY_COMPANIES);
+      setCompanies(comps);
+
+      const activeId = getActiveCompanyId();
+      setCompanyIdState(activeId);
+
+      const setts = await storeGet<CompanySettings>('companySettings', DEFAULT_COMPANY_SETTINGS);
+      setSettings(setts);
+
+      setCustomers(await storeGet<Customer[]>('customers', []));
+      setSuppliers(await storeGet<Supplier[]>('suppliers', []));
+
+      const loadedInv = await storeGet<InventoryItem[]>('inventory', DEFAULT_INVENTORY);
+      setInventory(loadedInv.length > 0 ? loadedInv : DEFAULT_INVENTORY);
+
+      const sBills = await storeGet<SalesBill[]>('salesBills', []);
+      setSalesBills(sBills);
+
+      const pBills = await storeGet<PurchaseBill[]>('purchaseBills', []);
+      setPurchaseBills(pBills);
+
+      setPayments(await storeGet<CustomerPayment[]>('payments', []));
+
+      const loadedEmp = await storeGet<Employee[]>('employees', DEFAULT_EMPLOYEES);
+      setEmployees(loadedEmp.length > 0 ? loadedEmp : DEFAULT_EMPLOYEES);
+
+      setProductionLogs(await storeGet<ProductionLog[]>('productionLogs', []));
+      setSalaryAdvances(await storeGet<SalaryAdvance[]>('salaryAdvances', []));
+
+      const loadedOrders = await storeGet<ProductionOrder[]>('productionOrders', DEFAULT_PRODUCTION_ORDERS);
+      setProductionOrders(loadedOrders.length > 0 ? loadedOrders : DEFAULT_PRODUCTION_ORDERS);
+
+      const loadedVars = await storeGet<VarietyCatalog[]>('varietyCatalog', DEFAULT_VARIETIES);
+      setVarieties(loadedVars.length > 0 ? loadedVars : DEFAULT_VARIETIES);
+
+      const loadedAudits = await storeGet<QualityCheckAudit[]>('qualityAudits', DEFAULT_QUALITY_AUDITS);
+      setQualityAudits(loadedAudits.length > 0 ? loadedAudits : DEFAULT_QUALITY_AUDITS);
+
+      const loadedRems = await storeGet<RoutineTaskReminder[]>('routineReminders', DEFAULT_ROUTINE_REMINDERS);
+      setRoutineReminders(loadedRems.length > 0 ? loadedRems : DEFAULT_ROUTINE_REMINDERS);
+
+      showToast('✅ Data refreshed & synced with Cloud!');
+    } catch (err) {
+      showToast('Data refresh completed');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   // Load Data on Startup & Company Change
   useEffect(() => {
     async function initData() {
@@ -946,6 +1005,16 @@ export default function App() {
           )}
 
           <button
+            onClick={handleRefreshData}
+            disabled={isRefreshing}
+            className="bg-emerald-800 hover:bg-emerald-700 text-emerald-100 text-xs px-2.5 py-1 rounded-md border border-emerald-600 flex items-center gap-1.5 cursor-pointer font-mono font-bold transition-colors disabled:opacity-50"
+            title="Refresh & Sync Data from Cloud"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-emerald-300 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>{isRefreshing ? 'Syncing...' : 'Refresh Data'}</span>
+          </button>
+
+          <button
             onClick={() => setShowSupabaseModal(true)}
             className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-2.5 py-1 rounded-md border border-slate-600 flex items-center gap-1.5 cursor-pointer font-mono transition-colors"
           >
@@ -971,6 +1040,14 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleRefreshData}
+            disabled={isRefreshing}
+            className="p-1.5 rounded bg-[#FAF8F3] text-[#8B5E1E] border border-[#D0C8B8] flex items-center justify-center cursor-pointer"
+            title="Refresh Data"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          </button>
           {appPin && (
             <button
               onClick={() => setIsAppLocked(true)}
@@ -1053,10 +1130,18 @@ export default function App() {
           </div>
 
           <div className="pt-4 mt-6 border-t border-[#D0C8B8] text-xs font-bold text-[#4A5C6C] flex items-center justify-between font-mono">
-            <div className="flex items-center gap-2">
+            <button
+              onClick={handleRefreshData}
+              disabled={isRefreshing}
+              className="flex items-center gap-2 hover:text-[#182228] cursor-pointer"
+              title="Click to Refresh Cloud Data"
+            >
               <div className={`w-2.5 h-2.5 rounded-full ${supabaseStatus?.connected ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'}`}></div>
-              <span>{supabaseStatus?.connected ? 'Supabase Sync' : 'Local Storage'}</span>
-            </div>
+              <span className="flex items-center gap-1">
+                {supabaseStatus?.connected ? 'Supabase Sync' : 'Local Storage'}
+                <RefreshCw className={`w-3 h-3 ml-1 ${isRefreshing ? 'animate-spin' : ''}`} />
+              </span>
+            </button>
             <button
               onClick={() => setShowSecurityModal(true)}
               className="p-1 hover:text-[#182228] transition-colors cursor-pointer"
@@ -1071,17 +1156,29 @@ export default function App() {
         <main className="flex-1 p-5 md:p-7 min-w-0 bg-[#F5F2EA]">
           {/* Active Company Switcher Bar */}
           <div className="company-bar flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 p-4 bg-[#EFECE4] border border-[#DDD7C9] rounded-none">
-            <div>
-              <label className="block text-xs font-mono font-extrabold text-[#405262] mb-1">Active Company / Subsidiary</label>
-              <select
-                value={companyId}
-                onChange={handleCompanyChange}
-                className="w-full sm:w-80 p-2.5 border border-[#D0C8B8] bg-[#FAF8F3] text-base text-[#182228] font-bold font-serif outline-none focus:border-[#8B5E1E]"
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4 w-full sm:w-auto">
+              <div>
+                <label className="block text-xs font-mono font-extrabold text-[#405262] mb-1">Active Company / Subsidiary</label>
+                <select
+                  value={companyId}
+                  onChange={handleCompanyChange}
+                  className="w-full sm:w-80 p-2.5 border border-[#D0C8B8] bg-[#FAF8F3] text-base text-[#182228] font-bold font-serif outline-none focus:border-[#8B5E1E]"
+                >
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                onClick={handleRefreshData}
+                disabled={isRefreshing}
+                className="mt-2 sm:mt-5 px-3.5 py-2 bg-[#8B5E1E] hover:bg-[#724c16] text-white font-mono font-bold text-xs rounded border border-[#724c16] flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors disabled:opacity-50"
+                title="Refresh and sync data from Cloud database"
               >
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+                <RefreshCw className={`w-4 h-4 text-amber-200 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span>{isRefreshing ? 'Syncing...' : 'Refresh / Sync Data'}</span>
+              </button>
             </div>
 
             <div className="text-xs font-mono font-bold text-[#506272] text-right max-w-sm">
@@ -1094,7 +1191,15 @@ export default function App() {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h1 className="page-title text-2xl font-bold tracking-tight text-slate-900 m-0">Factory Dashboard</h1>
-                <div className="flex gap-3">
+                <div className="flex gap-3 items-center">
+                  <button
+                    onClick={handleRefreshData}
+                    disabled={isRefreshing}
+                    className="bg-emerald-700 hover:bg-emerald-800 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshing ? 'Syncing...' : 'Refresh'}</span>
+                  </button>
                   <div className="bg-amber-50 text-amber-700 px-3.5 py-1.5 rounded-full text-xs font-semibold border border-amber-200 flex items-center gap-2">
                     <span className="w-2 h-2 bg-amber-500 rounded-full animate-ping"></span>
                     Alert: Sizing Mismatch Monitoring
