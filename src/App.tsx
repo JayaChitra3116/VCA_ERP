@@ -49,7 +49,7 @@ import { EmployeesTab } from './components/EmployeesTab';
 import { CustomersTab } from './components/CustomersTab';
 import { CustomerLedgerTab } from './components/CustomerLedgerTab';
 import { SuppliersTab } from './components/SuppliersTab';
-import { VoiceControlAssistant } from './components/VoiceControlAssistant';
+// import { VoiceControlAssistant } from './components/VoiceControlAssistant';
 import { SecurityAndPwaModal } from './components/SecurityAndPwaModal';
 import { PinLockOverlay } from './components/PinLockOverlay';
 
@@ -3271,8 +3271,8 @@ export default function App() {
         </div>
       )}
 
-      {/* VOICE CONTROL ASSISTANT (SENIOR FRIENDLY - TAMIL & ENGLISH) */}
-      <VoiceControlAssistant activePage={activePage} setActivePage={setActivePage} />
+      {/* VOICE CONTROL ASSISTANT (Disabled as requested to avoid UI overshadowing) */}
+      {/* <VoiceControlAssistant activePage={activePage} setActivePage={setActivePage} /> */}
 
       {/* SUPABASE STATUS DIAGNOSTIC MODAL */}
       {showSupabaseModal && (

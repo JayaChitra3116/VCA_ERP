@@ -6,16 +6,42 @@ import {
   getSupabaseCredentials, 
   saveSupabaseCredentials 
 } from '../lib/supabase';
-import { Database, CheckCircle2, AlertCircle, RefreshCw, Server, Key, Link2, Save } from 'lucide-react';
+import { Database, CheckCircle2, AlertCircle, RefreshCw, Server, Key, Link2, Save, Copy, FileText } from 'lucide-react';
 
 interface SupabaseStatusModalProps {
   onClose: () => void;
 }
 
+const SQL_FIX_SCRIPT = `-- Supabase SQL Permissions & Schema Fix Script
+-- Copy & paste into Supabase Dashboard -> SQL Editor -> Click RUN
+
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+
+ALTER TABLE IF EXISTS public.app_state DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.companies DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.company_settings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.customers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.suppliers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.inventory DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.variety_catalog DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.sales_bills DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.purchase_bills DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.customer_payments DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.production_orders DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.quality_audits DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.routine_reminders DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.employees DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.production_logs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.salary_advances DISABLE ROW LEVEL SECURITY;
+`;
+
 export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClose }) => {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<SupabaseHealthStatus | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
 
   const initialCreds = getSupabaseCredentials();
   const [urlInput, setUrlInput] = useState(initialCreds.url || 'https://lfmjmhcqrpsjtnubaxym.supabase.co');
@@ -26,6 +52,12 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
     const result = await checkSupabaseConnection();
     setStatus(result);
     setLoading(false);
+  };
+
+  const handleCopySql = () => {
+    navigator.clipboard.writeText(SQL_FIX_SCRIPT);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 3000);
   };
 
   const handleSaveCredentials = async (e: React.FormEvent) => {
@@ -144,6 +176,28 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
                 <p className="text-slate-700 font-mono bg-white p-2.5 rounded border border-slate-200">
                   {status.message}
                 </p>
+
+                {(status.permissionError || status.missingTables.length > 0) && (
+                  <div className="p-3 bg-amber-50 border border-amber-300 rounded-lg space-y-2 text-amber-900">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-bold text-[11px] flex items-center gap-1.5">
+                        <FileText className="w-4 h-4 text-amber-700" />
+                        <span>Fix Permissions &amp; Schema SQL Script</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCopySql}
+                        className="bg-amber-700 hover:bg-amber-800 text-white font-mono font-bold text-[11px] px-3 py-1 rounded flex items-center gap-1 shadow-xs cursor-pointer"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>{copiedSql ? 'Copied to Clipboard!' : 'Copy SQL Fix Script'}</span>
+                      </button>
+                    </div>
+                    <p className="text-[11px] font-sans text-amber-800">
+                      Open your <strong>Supabase Dashboard &gt; SQL Editor</strong>, paste this script, and click <strong>RUN</strong> to grant table access permissions and allow instant data insertions.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : null}
           </div>

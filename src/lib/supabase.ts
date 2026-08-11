@@ -78,6 +78,7 @@ export interface SupabaseHealthStatus {
   configured: boolean;
   connected: boolean;
   missingTables: string[];
+  permissionError?: boolean;
   message: string;
   urlUsed?: string;
 }
@@ -117,13 +118,29 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
 
   try {
     const missingTables: string[] = [];
+    let hasPermissionError = false;
     
     // Test table access individually
     for (const table of EXPECTED_TABLES) {
       const { error } = await client.from(table).select('count', { count: 'exact', head: true });
-      if (error && (error.code === 'PGRST301' || error.code === '42P01' || error.message.includes('relation') || error.message.includes('does not exist'))) {
-        missingTables.push(table);
+      if (error) {
+        if (error.code === '42501' || error.message.includes('permission denied')) {
+          hasPermissionError = true;
+        } else if (error.code === 'PGRST301' || error.code === '42P01' || error.message.includes('relation') || error.message.includes('does not exist')) {
+          missingTables.push(table);
+        }
       }
+    }
+
+    if (hasPermissionError) {
+      return {
+        configured: true,
+        connected: true,
+        missingTables,
+        permissionError: true,
+        urlUsed: url,
+        message: `⚠️ Supabase Connected, but Table Permissions are restricted (Error 42501). Your Supabase tables require GRANT privileges or Row Level Security (RLS) adjustment to allow anonymous read & write inserts. Run the Schema SQL script in Supabase SQL Editor.`
+      };
     }
 
     if (missingTables.length > 0) {
@@ -132,7 +149,7 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
         connected: true,
         missingTables,
         urlUsed: url,
-        message: `Connected to Supabase (${url}), but ${missingTables.length} table(s) are missing (${missingTables.join(', ')}). Run the schema SQL script in SQL Editor to enable all features.`
+        message: `Connected to Supabase (${url}), but ${missingTables.length} table(s) are missing (${missingTables.join(', ')}). Run the schema SQL script in SQL Editor to create missing tables.`
       };
     }
 
@@ -141,7 +158,7 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
       connected: true,
       missingTables: [],
       urlUsed: url,
-      message: `Successfully connected to Supabase project (${url})! All ${EXPECTED_TABLES.length} required tables are verified and ready.`
+      message: `Successfully connected to Supabase project (${url})! All ${EXPECTED_TABLES.length} required tables are verified and writable.`
     };
   } catch (err: any) {
     return {

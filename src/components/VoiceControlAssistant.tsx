@@ -324,9 +324,9 @@ export const VoiceControlAssistant: React.FC<VoiceControlAssistantProps> = ({
 
   return (
     <>
-      {/* PROMINENT TOP-HEADER / FLOATING VOICE ASSISTANT TRIGGER BUTTON */}
-      <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-2">
-        {/* Trigger Button with pulsing badge */}
+      {/* PROMINENT COMPACT BOTTOM-LEFT FLOATING VOICE ASSISTANT TRIGGER BUTTON */}
+      <div className="fixed bottom-4 left-4 sm:bottom-6 sm:left-6 z-40 flex flex-col items-start gap-2">
+        {/* Shortened & Compact Trigger Button */}
         <button
           onClick={() => {
             setIsOpen(!isOpen);
@@ -334,23 +334,25 @@ export const VoiceControlAssistant: React.FC<VoiceControlAssistantProps> = ({
               setLastActionStatus('');
             }
           }}
-          className={`px-4 py-3 rounded-full shadow-2xl border-2 flex items-center gap-3 transition-all transform hover:scale-105 cursor-pointer font-bold ${
+          className={`px-3 py-2 sm:px-3.5 sm:py-2 rounded-full shadow-xl border flex items-center gap-2 transition-all transform hover:scale-105 cursor-pointer font-bold ${
             isListening
               ? 'bg-rose-600 border-rose-300 text-white animate-pulse ring-4 ring-rose-300'
               : 'bg-[#182228] text-white border-[#8B5E1E] hover:bg-[#0D1419]'
           }`}
           title="Open Voice Control Assistant (தமிழ் & English)"
         >
-          <div className={`p-2 rounded-full ${isListening ? 'bg-rose-700' : 'bg-[#8B5E1E]'}`}>
-            <Mic className="w-6 h-6 text-white" />
+          <div className={`p-1.5 rounded-full ${isListening ? 'bg-rose-700' : 'bg-[#8B5E1E]'}`}>
+            <Mic className="w-4 h-4 text-white" />
           </div>
-          <div className="text-left font-sans">
-            <div className="text-xs font-mono font-extrabold text-amber-300 uppercase tracking-wide">
-              {selectedLang === 'ta-IN' ? 'குரல் கட்டுப்பாடு' : 'Voice Control'}
-            </div>
-            <div className="text-sm font-bold leading-none mt-0.5">
-              {isListening ? (selectedLang === 'ta-IN' ? 'கேட்கிறது...' : 'Listening...') : (selectedLang === 'ta-IN' ? 'பேசி கட்டுப்படுத்தலாம்' : 'Speak to Control')}
-            </div>
+          <div className="text-left font-sans flex items-center gap-1.5 pr-1">
+            <span className="text-xs font-mono font-extrabold text-amber-300 uppercase tracking-wide whitespace-nowrap">
+              {selectedLang === 'ta-IN' ? 'குரல் வழிகாட்டி' : 'Voice Assistant'}
+            </span>
+            {isListening && (
+              <span className="text-[10px] bg-rose-500 px-1.5 py-0.5 rounded text-white font-mono animate-pulse">
+                REC
+              </span>
+            )}
           </div>
         </button>
       </div>
