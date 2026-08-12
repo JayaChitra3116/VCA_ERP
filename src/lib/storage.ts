@@ -528,6 +528,27 @@ export async function globalSet<T>(key: string, val: T): Promise<void> {
         payload: val,
         updated_at: new Date().toISOString()
       }, { onConflict: 'company_id,store_key' });
+
+      // Also mirror the Subsidiary Companies list into the real `companies` table
+      if (key === 'companies' && Array.isArray(val) && val.length > 0) {
+        const rows = (val as any[]).map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          prefix: c.prefix || null,
+          address: c.address || null,
+          gstin: c.gstin || null,
+          phone: c.phone || null,
+          state: c.state || null,
+          bank_name: c.bankName || null,
+          bank_account: c.bankAccount || null,
+          bank_ifsc: c.bankIfsc || null,
+          is_default: !!c.isDefault
+        }));
+        const { error: compErr } = await client.from('companies').upsert(rows, { onConflict: 'id' });
+        if (compErr) {
+          console.warn('companies table mirror sync notice:', compErr.message);
+        }
+      }
     } catch (e) {}
   }
 }
