@@ -594,6 +594,23 @@ export async function globalSet<T>(key: string, val: T): Promise<void> {
         payload: val,
         updated_at: new Date().toISOString()
       }, { onConflict: 'company_id,store_key' });
+
+      if (key === 'companies' && Array.isArray(val) && val.length > 0) {
+        const rows = val.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          prefix: c.prefix || '',
+          address: c.address || '',
+          gstin: c.gstin || '',
+          phone: c.phone || '',
+          state: c.state || 'Tamil Nadu',
+          bank_name: c.bankName || null,
+          bank_account: c.bankAccount || null,
+          bank_ifsc: c.bankIfsc || null,
+          is_default: Boolean(c.isDefault)
+        }));
+        await client.from('companies').upsert(rows, { onConflict: 'id' });
+      }
     } catch (e) {}
   }
 }
@@ -622,10 +639,9 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
     'routineReminders'
   ];
 
-  let syncedCount = 0;
   let lastError: string | undefined = undefined;
 
-  for (const key of keysToSync) {
+  const syncSingleKey = async (key: string): Promise<boolean> => {
     try {
       const localRaw = localStorage.getItem(scopedKey(key));
       let localVal = localRaw ? JSON.parse(localRaw) : null;
@@ -649,7 +665,7 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
       }
 
       if (!valToSave) {
-        continue;
+        return false;
       }
 
       // Write merged val back to localStorage
@@ -667,193 +683,242 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
         updated_at: new Date().toISOString()
       }, { onConflict: 'company_id,store_key' });
 
-      if (!appStateErr) {
-        syncedCount++;
-      } else {
+      if (appStateErr) {
         lastError = appStateErr.message;
-        console.warn(`Upsert warning for key ${key} on app_state:`, appStateErr.message);
       }
 
-      // 2. Sync to relational table if array with items
-      if (key === 'salesBills' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((b: SalesBill) => ({
-          id: ensureUuid(b.id || `sb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`),
-          company_id: ensureUuid(companyId),
-          bill_no: b.billNo || 'VC-000',
-          date: b.date || new Date().toISOString().split('T')[0],
-          customer_name: b.customerName || 'Customer',
-          customer_state: b.customerState || 'Tamil Nadu',
-          subtotal: Number(b.subtotal) || 0,
-          cgst: Number(b.cgst) || 0,
-          sgst: Number(b.sgst) || 0,
-          igst: Number(b.igst) || 0,
-          grand: Number(b.grand) || 0,
-          status: (b.status === 'paid' || b.status === 'unpaid') ? b.status : 'unpaid',
-          items: b.items || []
-        }));
-        await client.from('sales_bills').upsert(rows, { onConflict: 'id' });
-      } else if (key === 'customers' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((c: Customer) => ({
-          id: c.id || `cust_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          company_id: companyId,
-          name: c.name,
-          phone: c.phone || null,
-          gstin: c.gstin || null,
-          address: c.address || null,
-          state: c.state || 'Tamil Nadu',
-          pincode: c.pincode || null,
-          balance: 0
-        }));
-        await client.from('customers').upsert(rows, { onConflict: 'id' });
-      } else if (key === 'suppliers' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((s: Supplier) => ({
-          id: s.id || `supp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          company_id: companyId,
-          name: s.name,
-          phone: s.phone || null,
-          gstin: s.gstin || null,
-          address: s.address || null,
-          balance: 0
-        }));
-        await client.from('suppliers').upsert(rows, { onConflict: 'id' });
-      } else if (key === 'inventory' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((item: InventoryItem) => ({
-          id: item.id || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          company_id: companyId,
-          name: item.name,
-          type: item.type,
-          unit: item.unit,
-          qty: item.qty || 0,
-          reorder_level: item.reorderLevel || 0
-        }));
-        await client.from('inventory').upsert(rows, { onConflict: 'id' });
-      } else if (key === 'employees' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((e: Employee) => ({
-          id: e.id || `emp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          company_id: companyId,
-          name: e.name,
-          role: e.role,
-          machine: e.machine || null,
-          salary: e.salary || 0
-        }));
-        await client.from('employees').upsert(rows, { onConflict: 'id' });
-      } else if (key === 'purchaseBills' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((b: any) => ({
-          id: b.id || `pb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          company_id: companyId,
-          bill_no: b.poNo || b.billNo || 'PB-000',
-          date: b.date || new Date().toISOString().split('T')[0],
-          supplier_name: b.supplierName || 'Supplier',
-          grand_total: b.grand || b.grandTotal || 0,
-          status: b.status || 'paid',
-          items: b.items || []
-        }));
-        await client.from('purchase_bills').upsert(rows, { onConflict: 'id' });
-      } else if (key === 'payments' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((p: any) => ({
-          id: p.id || `pay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          company_id: companyId,
-          customer_name: p.customerName || 'Customer',
-          date: p.date || new Date().toISOString().split('T')[0],
-          amount: p.amount || 0,
-          payment_mode: 'cash',
-          ref_no: p.note || null
-        }));
-        await client.from('customer_payments').upsert(rows, { onConflict: 'id' });
-      } else if (key === 'productionOrders' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((o: ProductionOrder) => ({
-          id: o.id || `po_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          company_id: companyId,
-          order_no: o.orderNo,
-          customer_name: o.customerName || null,
-          order_date: o.orderDate || null,
-          delivery_due_date: o.deliveryDueDate || null,
-          status: o.status || 'in_production',
-          notes: o.notes || null,
-          items: o.items || []
-        }));
-        await client.from('production_orders').upsert(rows, { onConflict: 'id' });
-      } else if (key === 'varietyCatalog' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((v: VarietyCatalog) => ({
-          id: v.id || `vc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          company_id: companyId,
-          variety_name: v.varietyName,
-          category: v.category || null,
-          standard_weight_gsm: v.standardWeightGsm || 0,
-          target_length_cm: v.targetLengthCm || 0,
-          target_width_cm: v.targetWidthCm || 0,
-          allowed_sizing_tolerance_pct: v.allowedSizingTolerancePct || 0,
-          allowed_gsm_tolerance_pct: v.allowedGsmTolerancePct || 0,
-          warp_yarn_spec: v.warpYarnSpec || null,
-          weft_yarn_spec: v.weftYarnSpec || null,
-          pile_yarn_spec: v.pileYarnSpec || null,
-          created_date: v.createdDate || null,
-          active_status: v.activeStatus ?? true,
-          assigned_machines: v.assignedMachines || []
-        }));
-        await client.from('variety_catalog').upsert(rows, { onConflict: 'id' });
-      } else if (key === 'qualityAudits' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((q: QualityCheckAudit) => ({
-          id: q.id || `qa_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          company_id: companyId,
-          check_date: q.checkDate || null,
-          check_time: q.checkTime || null,
-          machine_no: q.machineNo || null,
-          variety_name: q.varietyName || null,
-          operator_name: q.operatorName || null,
-          sample_no: q.sampleNo || 1,
-          actual_length_cm: q.actualLengthCm || 0,
-          actual_width_cm: q.actualWidthCm || 0,
-          actual_weight_gsm: q.actualWeightGsm || 0,
-          border_quality_score: q.borderQualityScore || 0,
-          selvedge_condition: q.selvedgeCondition || null,
-          sizing_status: q.sizingStatus || null,
-          gsm_status: q.gsmStatus || null,
-          overall_result: q.overallResult || 'PASS',
-          variance_notes: q.varianceNotes || null,
-          action_taken: q.actionTaken || null,
-          auditor_name: q.auditorName || null
-        }));
-        await client.from('quality_audits').upsert(rows, { onConflict: 'id' });
-      } else if (key === 'routineReminders' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((r: RoutineTaskReminder) => ({
-          id: r.id || `rr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          company_id: companyId,
-          task_title: r.taskTitle,
-          machine_no: r.machineNo || null,
-          category: r.category || null,
-          frequency_days: r.frequencyDays || 1,
-          last_checked_date: r.lastCheckedDate || null,
-          next_due_date: r.nextDueDate || null,
-          assigned_role_or_person: r.assignedRoleOrPerson || null,
-          status: r.status || 'pending',
-          checklist_items: r.checklistItems || [],
-          notes: r.notes || null
-        }));
-        await client.from('routine_reminders').upsert(rows, { onConflict: 'id' });
-      }
-    } catch (e: any) {
-      lastError = e?.message || String(e);
-      console.error(`Error syncing key ${key}:`, e);
+      // 2. Relational table sync (safe background execution)
+      try {
+        if (key === 'companySettings' && val && typeof val === 'object') {
+          const s = val as any;
+          await client.from('company_settings').upsert({
+            id: companyId,
+            company_id: companyId,
+            name: s.name || '',
+            address: s.address || '',
+            phone: s.phone || '',
+            gstin: s.gstin || '',
+            state: s.state || 'Tamil Nadu',
+            pincode: s.pincode || '',
+            bank_name: s.bankName || '',
+            bank_account: s.bankAccount || '',
+            bank_ifsc: s.bankIfsc || '',
+            bank_branch: s.bankBranch || '',
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'id' });
+        } else if (key === 'salesBills' && Array.isArray(val) && val.length > 0) {
+          const rows = val.map((b: SalesBill) => ({
+            id: ensureUuid(b.id || `sb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`),
+            company_id: ensureUuid(companyId),
+            bill_no: b.billNo || 'VC-000',
+            date: b.date || new Date().toISOString().split('T')[0],
+            customer_name: b.customerName || 'Customer',
+            customer_state: b.customerState || 'Tamil Nadu',
+            subtotal: Number(b.subtotal) || 0,
+            cgst: Number(b.cgst) || 0,
+            sgst: Number(b.sgst) || 0,
+            igst: Number(b.igst) || 0,
+            grand: Number(b.grand) || 0,
+            status: (b.status === 'paid' || b.status === 'unpaid') ? b.status : 'unpaid',
+            items: b.items || []
+          }));
+          await client.from('sales_bills').upsert(rows, { onConflict: 'id' });
+        } else if (key === 'customers' && Array.isArray(val) && val.length > 0) {
+          const rows = val.map((c: Customer) => ({
+            id: c.id || `cust_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            company_id: companyId,
+            name: c.name,
+            phone: c.phone || null,
+            gstin: c.gstin || null,
+            address: c.address || null,
+            state: c.state || 'Tamil Nadu',
+            pincode: c.pincode || null,
+            balance: 0
+          }));
+          await client.from('customers').upsert(rows, { onConflict: 'id' });
+        } else if (key === 'suppliers' && Array.isArray(val) && val.length > 0) {
+          const rows = val.map((s: Supplier) => ({
+            id: s.id || `supp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            company_id: companyId,
+            name: s.name,
+            phone: s.phone || null,
+            gstin: s.gstin || null,
+            address: s.address || null,
+            balance: 0
+          }));
+          await client.from('suppliers').upsert(rows, { onConflict: 'id' });
+        } else if (key === 'inventory' && Array.isArray(val) && val.length > 0) {
+          const rows = val.map((item: InventoryItem) => ({
+            id: item.id || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            company_id: companyId,
+            name: item.name,
+            type: item.type,
+            unit: item.unit,
+            qty: item.qty || 0,
+            reorder_level: item.reorderLevel || 0
+          }));
+          await client.from('inventory').upsert(rows, { onConflict: 'id' });
+        } else if (key === 'employees' && Array.isArray(val) && val.length > 0) {
+          const rows = val.map((e: Employee) => ({
+            id: e.id || `emp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            company_id: companyId,
+            name: e.name,
+            role: e.role,
+            machine: e.machine || null,
+            salary: e.salary || 0
+          }));
+          await client.from('employees').upsert(rows, { onConflict: 'id' });
+        } else if (key === 'purchaseBills' && Array.isArray(val) && val.length > 0) {
+          const rows = val.map((b: any) => ({
+            id: b.id || `pb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            company_id: companyId,
+            bill_no: b.poNo || b.billNo || 'PB-000',
+            date: b.date || new Date().toISOString().split('T')[0],
+            supplier_name: b.supplierName || 'Supplier',
+            grand_total: b.grand || b.grandTotal || 0,
+            status: b.status || 'paid',
+            items: b.items || []
+          }));
+          await client.from('purchase_bills').upsert(rows, { onConflict: 'id' });
+        } else if (key === 'payments' && Array.isArray(val) && val.length > 0) {
+          const rows = val.map((p: any) => ({
+            id: p.id || `pay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            company_id: companyId,
+            customer_name: p.customerName || 'Customer',
+            date: p.date || new Date().toISOString().split('T')[0],
+            amount: p.amount || 0,
+            payment_mode: 'cash',
+            ref_no: p.note || null
+          }));
+          await client.from('customer_payments').upsert(rows, { onConflict: 'id' });
+        } else if (key === 'productionOrders' && Array.isArray(val) && val.length > 0) {
+          const rows = val.map((o: ProductionOrder) => ({
+            id: o.id || `po_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            company_id: companyId,
+            order_no: o.orderNo,
+            customer_name: o.customerName || null,
+            order_date: o.orderDate || null,
+            delivery_due_date: o.deliveryDueDate || null,
+            status: o.status || 'in_production',
+            notes: o.notes || null,
+            items: o.items || []
+          }));
+          await client.from('production_orders').upsert(rows, { onConflict: 'id' });
+        } else if (key === 'varietyCatalog' && Array.isArray(val) && val.length > 0) {
+          const rows = val.map((v: VarietyCatalog) => ({
+            id: v.id || `vc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            company_id: companyId,
+            variety_name: v.varietyName,
+            category: v.category || null,
+            standard_weight_gsm: v.standardWeightGsm || 0,
+            target_length_cm: v.targetLengthCm || 0,
+            target_width_cm: v.targetWidthCm || 0,
+            allowed_sizing_tolerance_pct: v.allowedSizingTolerancePct || 0,
+            allowed_gsm_tolerance_pct: v.allowedGsmTolerancePct || 0,
+            warp_yarn_spec: v.warpYarnSpec || null,
+            weft_yarn_spec: v.weftYarnSpec || null,
+            pile_yarn_spec: v.pileYarnSpec || null,
+            created_date: v.createdDate || null,
+            active_status: v.activeStatus ?? true,
+            assigned_machines: v.assignedMachines || []
+          }));
+          await client.from('variety_catalog').upsert(rows, { onConflict: 'id' });
+        } else if (key === 'qualityAudits' && Array.isArray(val) && val.length > 0) {
+          const rows = val.map((q: QualityCheckAudit) => ({
+            id: q.id || `qa_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            company_id: companyId,
+            check_date: q.checkDate || null,
+            check_time: q.checkTime || null,
+            machine_no: q.machineNo || null,
+            variety_name: q.varietyName || null,
+            operator_name: q.operatorName || null,
+            sample_no: q.sampleNo || 1,
+            actual_length_cm: q.actualLengthCm || 0,
+            actual_width_cm: q.actualWidthCm || 0,
+            actual_weight_gsm: q.actualWeightGsm || 0,
+            border_quality_score: q.borderQualityScore || 0,
+            selvedge_condition: q.selvedgeCondition || null,
+            sizing_status: q.sizingStatus || null,
+            gsm_status: q.gsmStatus || null,
+            overall_result: q.overallResult || 'PASS',
+            variance_notes: q.varianceNotes || null,
+            action_taken: q.actionTaken || null,
+            auditor_name: q.auditorName || null
+          }));
+          await client.from('quality_audits').upsert(rows, { onConflict: 'id' });
+        } else if (key === 'routineReminders' && Array.isArray(val) && val.length > 0) {
+          const rows = val.map((r: RoutineTaskReminder) => ({
+            id: r.id || `rr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            company_id: companyId,
+            task_title: r.taskTitle,
+            machine_no: r.machineNo || null,
+            category: r.category || null,
+            frequency_days: r.frequencyDays || 1,
+            last_checked_date: r.lastCheckedDate || null,
+            next_due_date: r.nextDueDate || null,
+            assigned_role_or_person: r.assignedRoleOrPerson || null,
+            status: r.status || 'pending',
+            checklist_items: r.checklistItems || [],
+            notes: r.notes || null
+          }));
+          await client.from('routine_reminders').upsert(rows, { onConflict: 'id' });
+        }
+      } catch (e) {}
+
+      return true;
+    } catch (err: any) {
+      return false;
     }
-  }
+  };
 
-  // Also sync global companies if exists locally
   try {
-    const compsRaw = localStorage.getItem(GLOBAL_STORE_PREFIX + 'companies');
-    if (compsRaw) {
-      const comps = JSON.parse(compsRaw);
-      await client.from('app_state').upsert({
-        company_id: 'global',
-        store_key: 'companies',
-        payload: comps,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'company_id,store_key' });
-      syncedCount++;
-    }
-  } catch (e) {}
+    // Also sync global companies if exists locally
+    try {
+      const compsRaw = localStorage.getItem(GLOBAL_STORE_PREFIX + 'companies');
+      if (compsRaw) {
+        const comps = JSON.parse(compsRaw);
+        await client.from('app_state').upsert({
+          company_id: 'global',
+          store_key: 'companies',
+          payload: comps,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'company_id,store_key' });
 
-  return { syncedKeys: syncedCount, error: lastError };
+        if (Array.isArray(comps) && comps.length > 0) {
+          const compRows = comps.map((c: any) => ({
+            id: c.id,
+            name: c.name,
+            prefix: c.prefix || '',
+            address: c.address || '',
+            gstin: c.gstin || '',
+            phone: c.phone || '',
+            state: c.state || 'Tamil Nadu',
+            bank_name: c.bankName || null,
+            bank_account: c.bankAccount || null,
+            bank_ifsc: c.bankIfsc || null,
+            is_default: Boolean(c.isDefault)
+          }));
+          await client.from('companies').upsert(compRows, { onConflict: 'id' });
+        }
+      }
+    } catch (e) {}
+
+    // Run all key syncs in parallel with a 6-second timeout race
+    const syncPromise = Promise.allSettled(keysToSync.map(k => syncSingleKey(k)));
+    const timeoutPromise = new Promise<any>((resolve) => 
+      setTimeout(() => resolve('timeout'), 6000)
+    );
+
+    const raceResult = await Promise.race([syncPromise, timeoutPromise]);
+    let syncedCount = 0;
+    if (Array.isArray(raceResult)) {
+      syncedCount = raceResult.filter(r => r.status === 'fulfilled' && r.value === true).length;
+    }
+
+    return { syncedKeys: syncedCount, error: lastError };
+  } catch (err: any) {
+    return { syncedKeys: 0, error: err?.message || 'Sync failed' };
+  }
 }
 
 // DEFAULT INITIAL SEED DATA FOR NEW INSTALLATIONS

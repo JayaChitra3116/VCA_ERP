@@ -112,22 +112,51 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
       configured: false,
       connected: false,
       missingTables: EXPECTED_TABLES,
-      message: 'Supabase Project URL or Anon Key is missing. Enter your credentials below to connect to your Supabase project (lfmjmhcqrpsjtnubaxym).'
+      message: 'Supabase Project URL or Anon Key is missing. Enter your credentials below to connect to your Supabase project.'
     };
   }
 
   try {
+    // Fast probe test with 3.5s timeout
+    const probePromise = client.from('app_state').select('count', { count: 'exact', head: true });
+    const timeoutPromise = new Promise<{ error: any }>((_, reject) => 
+      setTimeout(() => reject(new Error('Connection probe timed out')), 3500)
+    );
+
+    const probeRes: any = await Promise.race([probePromise, timeoutPromise]).catch(err => ({ error: err }));
+    if (probeRes.error && (probeRes.error.message?.includes('timed out') || probeRes.error.message?.includes('Failed to fetch'))) {
+      return {
+        configured: true,
+        connected: false,
+        missingTables: EXPECTED_TABLES,
+        urlUsed: url,
+        message: `Network timeout connecting to Supabase (${url}). Using local storage mode.`
+      };
+    }
+
+    // Parallel check of all expected tables
+    const checkResults = await Promise.allSettled(
+      EXPECTED_TABLES.map(async (table) => {
+        const { error } = await client.from(table).select('count', { count: 'exact', head: true });
+        return { table, error };
+      })
+    );
+
     const missingTables: string[] = [];
     let hasPermissionError = false;
-    
-    // Test table access individually
-    for (const table of EXPECTED_TABLES) {
-      const { error } = await client.from(table).select('count', { count: 'exact', head: true });
-      if (error) {
-        if (error.code === '42501' || error.message.includes('permission denied')) {
+
+    for (const res of checkResults) {
+      if (res.status === 'fulfilled' && res.value.error) {
+        const error = res.value.error;
+        if (error.code === '42501' || error.message?.includes('permission denied')) {
           hasPermissionError = true;
-        } else if (error.code === 'PGRST301' || error.code === '42P01' || error.message.includes('relation') || error.message.includes('does not exist')) {
-          missingTables.push(table);
+        } else if (
+          error.code === 'PGRST301' || 
+          error.code === '42P01' || 
+          error.message?.includes('relation') || 
+          error.message?.includes('does not exist')
+        ) {
+          missingTables.push(res.value.table);
         }
       }
     }
@@ -139,7 +168,7 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
         missingTables,
         permissionError: true,
         urlUsed: url,
-        message: `⚠️ Supabase Connected, but Table Permissions are restricted (Error 42501). Your Supabase tables require GRANT privileges or Row Level Security (RLS) adjustment to allow anonymous read & write inserts. Run the Schema SQL script in Supabase SQL Editor.`
+        message: `⚠️ Supabase Connected, but Table Permissions are restricted (Error 42501). Run the Schema SQL script in Supabase SQL Editor.`
       };
     }
 
@@ -149,7 +178,7 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
         connected: true,
         missingTables,
         urlUsed: url,
-        message: `Connected to Supabase (${url}), but ${missingTables.length} table(s) are missing (${missingTables.join(', ')}). Run the schema SQL script in SQL Editor to create missing tables.`
+        message: `Connected to Supabase (${url}), but ${missingTables.length} table(s) are missing (${missingTables.join(', ')}).`
       };
     }
 
@@ -158,7 +187,7 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
       connected: true,
       missingTables: [],
       urlUsed: url,
-      message: `Successfully connected to Supabase project (${url})! All ${EXPECTED_TABLES.length} required tables are verified and writable.`
+      message: `Successfully connected to Supabase project (${url})! All ${EXPECTED_TABLES.length} tables verified.`
     };
   } catch (err: any) {
     return {

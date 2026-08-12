@@ -270,69 +270,83 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefreshData = async (silent: boolean = false) => {
+    if (isRefreshing && !silent) return;
+    
     if (!silent) {
       setIsRefreshing(true);
-      showToast('🔄 Syncing & merging local data with Supabase Cloud...');
+      showToast('🔄 Syncing & merging data with Supabase Cloud...');
     }
     try {
       const supCheck = await checkSupabaseConnection();
       setSupabaseStatus(supCheck);
 
-      // 1. FIRST: Sync local modifications to Cloud (with bidirectional merge)
+      // 1. FIRST: Sync local modifications to Cloud (with parallel key processing)
       let syncRes: { syncedKeys: number; error?: string } = { syncedKeys: 0 };
       if (supCheck.connected) {
         syncRes = await forceSyncAllDataToCloud();
       }
 
-      // 2. THEN: Load merged dataset into React state
-      const comps = await globalGet<SubsidiaryCompany[]>('companies', DEFAULT_SUBSIDIARY_COMPANIES);
+      // 2. THEN: Load merged dataset into React state in parallel
+      const [
+        comps,
+        setts,
+        custs,
+        supps,
+        inv,
+        sBills,
+        pBills,
+        pmts,
+        emps,
+        pLogs,
+        sAdvs,
+        pOrders,
+        vars,
+        qAudits,
+        rRems
+      ] = await Promise.all([
+        globalGet<SubsidiaryCompany[]>('companies', DEFAULT_SUBSIDIARY_COMPANIES),
+        storeGet<CompanySettings>('companySettings', DEFAULT_COMPANY_SETTINGS),
+        storeGet<Customer[]>('customers', []),
+        storeGet<Supplier[]>('suppliers', []),
+        storeGet<InventoryItem[]>('inventory', DEFAULT_INVENTORY),
+        storeGet<SalesBill[]>('salesBills', []),
+        storeGet<PurchaseBill[]>('purchaseBills', []),
+        storeGet<CustomerPayment[]>('payments', []),
+        storeGet<Employee[]>('employees', DEFAULT_EMPLOYEES),
+        storeGet<ProductionLog[]>('productionLogs', []),
+        storeGet<SalaryAdvance[]>('salaryAdvances', []),
+        storeGet<ProductionOrder[]>('productionOrders', DEFAULT_PRODUCTION_ORDERS),
+        storeGet<VarietyCatalog[]>('varietyCatalog', DEFAULT_VARIETIES),
+        storeGet<QualityCheckAudit[]>('qualityAudits', DEFAULT_QUALITY_AUDITS),
+        storeGet<RoutineTaskReminder[]>('routineReminders', DEFAULT_ROUTINE_REMINDERS)
+      ]);
+
       setCompanies(comps);
+      setSettings(setts);
+      setCustomers(custs);
+      setSuppliers(supps);
+      setInventory(inv);
+      setSalesBills(sBills);
+      setPurchaseBills(pBills);
+      setPayments(pmts);
+      setEmployees(emps);
+      setProductionLogs(pLogs);
+      setSalaryAdvances(sAdvs);
+      setProductionOrders(pOrders);
+      setVarieties(vars);
+      setQualityAudits(qAudits);
+      setRoutineReminders(rRems);
 
       const activeId = getActiveCompanyId();
       setCompanyIdState(activeId);
 
-      const setts = await storeGet<CompanySettings>('companySettings', DEFAULT_COMPANY_SETTINGS);
-      setSettings(setts);
-
-      setCustomers(await storeGet<Customer[]>('customers', []));
-      setSuppliers(await storeGet<Supplier[]>('suppliers', []));
-
-      const loadedInv = await storeGet<InventoryItem[]>('inventory', DEFAULT_INVENTORY);
-      setInventory(loadedInv);
-
-      const sBills = await storeGet<SalesBill[]>('salesBills', []);
-      setSalesBills(sBills);
-
-      const pBills = await storeGet<PurchaseBill[]>('purchaseBills', []);
-      setPurchaseBills(pBills);
-
-      setPayments(await storeGet<CustomerPayment[]>('payments', []));
-
-      const loadedEmp = await storeGet<Employee[]>('employees', DEFAULT_EMPLOYEES);
-      setEmployees(loadedEmp);
-
-      setProductionLogs(await storeGet<ProductionLog[]>('productionLogs', []));
-      setSalaryAdvances(await storeGet<SalaryAdvance[]>('salaryAdvances', []));
-
-      const loadedOrders = await storeGet<ProductionOrder[]>('productionOrders', DEFAULT_PRODUCTION_ORDERS);
-      setProductionOrders(loadedOrders);
-
-      const loadedVars = await storeGet<VarietyCatalog[]>('varietyCatalog', DEFAULT_VARIETIES);
-      setVarieties(loadedVars);
-
-      const loadedAudits = await storeGet<QualityCheckAudit[]>('qualityAudits', DEFAULT_QUALITY_AUDITS);
-      setQualityAudits(loadedAudits);
-
-      const loadedRems = await storeGet<RoutineTaskReminder[]>('routineReminders', DEFAULT_ROUTINE_REMINDERS);
-      setRoutineReminders(loadedRems);
-
       if (!silent) {
         if (!supCheck.connected) {
-          showToast(`⚠️ Supabase disconnected: ${supCheck.message}`);
+          showToast(`⚠️ Refreshed from local storage (${supCheck.message || 'Offline mode'})`);
         } else if (syncRes.error) {
-          showToast(`⚠️ Refreshed, sync note: ${syncRes.error}`);
+          showToast(`⚠️ Refreshed! Sync note: ${syncRes.error}`);
         } else {
-          showToast(`✅ Synced & Merged ${syncRes.syncedKeys} entities with Supabase Cloud!`);
+          showToast(`✅ Data Synced & Updated from Supabase Cloud!`);
         }
       }
     } catch (err: any) {
@@ -1165,24 +1179,14 @@ export default function App() {
           </div>
 
           <div className="pt-4 mt-6 border-t border-[#D0C8B8] text-xs font-bold text-[#4A5C6C] flex items-center justify-between font-mono">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowSupabaseModal(true)}
-                className="flex items-center gap-2 hover:text-[#182228] cursor-pointer"
-                title="Click to view Supabase Connection & Diagnostics Popup"
-              >
-                <div className={`w-2.5 h-2.5 rounded-full ${supabaseStatus?.connected ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'}`}></div>
-                <span>{supabaseStatus?.connected ? 'Supabase Sync' : 'Local Storage'}</span>
-              </button>
-              <button
-                onClick={handleRefreshData}
-                disabled={isRefreshing}
-                className="p-1 hover:text-[#182228] cursor-pointer"
-                title="Sync & Refresh Data from Cloud"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-[#8B5E1E] ${isRefreshing ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
+            <button
+              onClick={() => setShowSupabaseModal(true)}
+              className="flex items-center gap-2 hover:text-[#182228] cursor-pointer"
+              title="Click to view Supabase Connection & Diagnostics Popup"
+            >
+              <div className={`w-2.5 h-2.5 rounded-full ${supabaseStatus?.connected ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'}`}></div>
+              <span>{supabaseStatus?.connected ? 'Supabase Sync' : 'Local Storage'}</span>
+            </button>
             <button
               onClick={() => setShowSecurityModal(true)}
               className="p-1 hover:text-[#182228] transition-colors cursor-pointer"
@@ -1227,16 +1231,6 @@ export default function App() {
                   ))}
                 </select>
               </div>
-
-              <button
-                onClick={handleRefreshData}
-                disabled={isRefreshing}
-                className="mt-2 sm:mt-5 px-3.5 py-2 bg-[#8B5E1E] hover:bg-[#724c16] text-white font-mono font-bold text-xs rounded border border-[#724c16] flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors disabled:opacity-50"
-                title="Refresh and sync data from Cloud database"
-              >
-                <RefreshCw className={`w-4 h-4 text-amber-200 ${isRefreshing ? 'animate-spin' : ''}`} />
-                <span>{isRefreshing ? 'Syncing...' : 'Refresh / Sync Data'}</span>
-              </button>
             </div>
 
             <div className="text-xs font-mono font-bold text-[#506272] text-right max-w-sm">
@@ -1250,14 +1244,6 @@ export default function App() {
               <div className="flex items-center justify-between">
                 <h1 className="page-title text-2xl font-bold tracking-tight text-slate-900 m-0">Factory Dashboard</h1>
                 <div className="flex gap-3 items-center">
-                  <button
-                    onClick={handleRefreshData}
-                    disabled={isRefreshing}
-                    className="bg-emerald-700 hover:bg-emerald-800 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-                    <span>{isRefreshing ? 'Syncing...' : 'Refresh'}</span>
-                  </button>
                   <div className="bg-amber-50 text-amber-700 px-3.5 py-1.5 rounded-full text-xs font-semibold border border-amber-200 flex items-center gap-2">
                     <span className="w-2 h-2 bg-amber-500 rounded-full animate-ping"></span>
                     Alert: Sizing Mismatch Monitoring
