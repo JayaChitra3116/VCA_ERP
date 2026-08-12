@@ -316,7 +316,7 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
         if (key === 'salesBills' && Array.isArray(val) && val.length > 0) {
           const rows = val.map((b: any) => ({
             id: ensureUuid(b.id || `sb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`),
-            company_id: ensureUuid(companyId),
+            company_id: companyId,
             bill_no: b.billNo || 'VC-000',
             date: b.date || new Date().toISOString().split('T')[0],
             customer_name: b.customerName || 'Customer',
