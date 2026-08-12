@@ -611,13 +611,20 @@ export default function App() {
   };
 
   // Inventory Change Helper
-  const changeStockByName = async (name: string, type: 'raw' | 'finished', delta: number, unit = 'pcs') => {
+const changeStockByName = async (name: string, type: 'raw' | 'finished', delta: number, unit = 'pcs') => {
     const updated = [...inventory];
     const match = updated.find((i) => i.name.toLowerCase() === name.toLowerCase());
     if (match) {
       match.qty = (match.qty || 0) + delta;
     } else {
-      updated.push({ name, type, unit, qty: Math.max(delta, 0), reorderLevel: 0 });
+      updated.push({
+        id: `inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        type,
+        unit,
+        qty: Math.max(delta, 0),
+        reorderLevel: 0
+      });
     }
     setInventory(updated);
     await storeSet('inventory', updated);
