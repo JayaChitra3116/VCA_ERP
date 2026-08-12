@@ -88,11 +88,12 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
       return;
     }
 
-    const newCustomer: Customer = {
-      ...form,
-      name: form.name.trim(),
-      address: form.address || form.place
-    };
+  const newCustomer: Customer = {
+        ...form,
+        id: `cust_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name: form.name.trim(),
+        address: form.address || form.place
+      };
 
     const updated = [newCustomer, ...customers];
     setCustomers(updated);
