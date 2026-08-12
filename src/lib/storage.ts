@@ -505,34 +505,8 @@ export async function globalGet<T>(key: string, fallback: T): Promise<T> {
           localStorage.setItem(GLOBAL_STORE_PREFIX + key, JSON.stringify(data.payload));
         } catch {}
         return data.payload as T;
-      }
-
-      if (key === 'companies') {
-        const { data: companyRows, error: companyError } = await client.from('companies').select('*');
-        if (!companyError && companyRows && companyRows.length > 0) {
-          const companies = companyRows.map((company: any) => ({
-            id: company.id,
-            name: company.name,
-            prefix: company.prefix || '',
-            address: company.address || '',
-            gstin: company.gstin || '',
-            phone: company.phone || '',
-            state: company.state || '',
-            bankName: company.bank_name || '',
-            bankAccount: company.bank_account || '',
-            bankIfsc: company.bank_ifsc || '',
-            isDefault: Boolean(company.is_default)
-          }));
-          try {
-            localStorage.setItem(GLOBAL_STORE_PREFIX + key, JSON.stringify(companies));
-          } catch {}
-          return companies as T;
-        }
-
-        // Seed the known default companies only after a successful empty-table read.
-        if (!companyError && Array.isArray(localVal) && localVal.length > 0) {
-          await globalSet(key, localVal);
-        }
+      } else if (hasLocalData) {
+        await globalSet(key, localVal);
       }
     } catch (e) {}
   }
@@ -554,24 +528,6 @@ export async function globalSet<T>(key: string, val: T): Promise<void> {
         payload: val,
         updated_at: new Date().toISOString()
       }, { onConflict: 'company_id,store_key' });
-
-      if (key === 'companies' && Array.isArray(val)) {
-        const rows = val.map((company: any) => ({
-          id: company.id,
-          name: company.name,
-          prefix: company.prefix || null,
-          address: company.address || null,
-          gstin: company.gstin || null,
-          phone: company.phone || null,
-          state: company.state || null,
-          bank_name: company.bankName || null,
-          bank_account: company.bankAccount || null,
-          bank_ifsc: company.bankIfsc || null,
-          is_default: Boolean(company.isDefault)
-        }));
-        const { error: companiesError } = await client.from('companies').upsert(rows, { onConflict: 'id' });
-        if (companiesError) throw companiesError;
-      }
     } catch (e) {}
   }
 }
@@ -799,7 +755,12 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
     const compsRaw = localStorage.getItem(GLOBAL_STORE_PREFIX + 'companies');
     if (compsRaw) {
       const comps = JSON.parse(compsRaw);
-      await globalSet('companies', comps);
+      await client.from('app_state').upsert({
+        company_id: 'global',
+        store_key: 'companies',
+        payload: comps,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'company_id,store_key' });
       syncedCount++;
     }
   } catch (e) {}
