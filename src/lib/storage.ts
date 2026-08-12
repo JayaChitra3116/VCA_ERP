@@ -131,6 +131,8 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
         try {
           localStorage.setItem(scopedKey(key), JSON.stringify(merged));
         } catch {}
+        // Mirror to relational table
+        syncPayloadToRelationalTable(companyId, key, merged);
         return merged;
       }
 
@@ -355,6 +357,330 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
   return localVal;
 }
 
+export async function safeUpsertRelationalTable(tableName: string, initialRows: any[]): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!getIsSupabaseConfigured() || !client || !initialRows || initialRows.length === 0) return false;
+
+  let currentRows = initialRows.map(r => ({ ...r }));
+  let maxAttempts = 12;
+  let attempt = 0;
+
+  while (attempt < maxAttempts) {
+    attempt++;
+    let error: any = null;
+    try {
+      const res = await client.from(tableName).upsert(currentRows, { onConflict: 'id' });
+      error = res.error;
+    } catch (fetchErr: any) {
+      console.warn(`⚠️ Network connection issue syncing '${tableName}' (Failed to fetch):`, fetchErr?.message || String(fetchErr));
+      return false;
+    }
+
+    if (!error) {
+      console.log(`✅ Relational sync success for ${tableName} (${currentRows.length} rows inserted)`);
+      return true;
+    }
+
+    const errorMsg = error.message || error.details || String(error);
+
+    // RLS Policy Error Check
+    if (
+      error.code === '42501' || 
+      errorMsg.includes('row-level security') || 
+      errorMsg.includes('permission denied') ||
+      errorMsg.includes('violates row-level security policy')
+    ) {
+      console.warn(`⚠️ Relational table '${tableName}' has Row-Level Security (RLS) active in Supabase. Data is preserved safely in 'app_state'. Run the SQL Fix Script in Supabase Dashboard to enable relational table queries.`);
+      return false;
+    }
+
+    // Check 1: Missing column error (e.g. "Could not find the 'address' column of 'customers' in the schema cache")
+    const missingColMatch = errorMsg.match(/Could not find the '([^']+)' column/i);
+    if (missingColMatch && missingColMatch[1]) {
+      const missingCol = missingColMatch[1];
+      console.warn(`⚠️ Column '${missingCol}' missing in '${tableName}' table schema. Stripping column and retrying...`);
+      currentRows = currentRows.map(r => {
+        const copy = { ...r };
+        delete copy[missingCol];
+        return copy;
+      });
+      continue;
+    }
+
+    // Check 2: UUID syntax error (e.g. "invalid input syntax for type uuid: "comp-vca"")
+    if (errorMsg.includes('invalid input syntax for type uuid')) {
+      console.warn(`⚠️ UUID type requirement detected on '${tableName}'. Converting IDs to UUID format...`);
+      currentRows = currentRows.map(r => {
+        const copy = { ...r };
+        if (copy.company_id && !/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(String(copy.company_id))) {
+          copy.company_id = ensureUuid(String(copy.company_id));
+        }
+        if (copy.id && !/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(String(copy.id))) {
+          copy.id = ensureUuid(String(copy.id));
+        }
+        return copy;
+      });
+      continue;
+    }
+
+    // Unhandled error
+    console.warn(`⚠️ Sync notice for ${tableName}:`, errorMsg);
+    return false;
+  }
+
+  return false;
+}
+
+export async function syncPayloadToRelationalTable(companyId: string, key: string, val: any): Promise<void> {
+  const client = getSupabaseClient();
+  if (!getIsSupabaseConfigured() || !client || !val) return;
+
+  try {
+    if (key === 'companySettings' && typeof val === 'object') {
+      const s = val as any;
+      await safeUpsertRelationalTable('company_settings', [{
+        id: companyId,
+        company_id: companyId,
+        name: s.name || '',
+        address: s.address || '',
+        phone: s.phone || '',
+        gstin: s.gstin || '',
+        state: s.state || 'Tamil Nadu',
+        pincode: s.pincode || '',
+        bank_name: s.bankName || '',
+        bank_account: s.bankAccount || '',
+        bank_ifsc: s.bankIfsc || '',
+        bank_branch: s.bankBranch || '',
+        updated_at: new Date().toISOString()
+      }]);
+    } else if (key === 'salesBills' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((b: any) => ({
+        id: ensureUuid(b.id || `sb_${b.billNo}`),
+        company_id: ensureUuid(companyId),
+        bill_no: b.billNo || 'VC-000',
+        date: b.date || new Date().toISOString().split('T')[0],
+        customer_name: b.customerName || 'Customer',
+        customer_phone: b.customerPhone || '',
+        customer_gstin: b.customerGstin || '',
+        customer_address: b.customerAddress || '',
+        customer_state: b.customerState || 'Tamil Nadu',
+        subtotal: Number(b.subtotal) || 0,
+        cgst: Number(b.cgst) || 0,
+        sgst: Number(b.sgst) || 0,
+        igst: Number(b.igst) || 0,
+        grand: Number(b.grand) || Number(b.grandTotal) || 0,
+        grand_total: Number(b.grand) || Number(b.grandTotal) || 0,
+        status: (b.status === 'paid' || b.status === 'unpaid') ? b.status : 'unpaid',
+        items: b.items || []
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('sales_bills', Array.from(uniqueMap.values()));
+    } else if (key === 'customers' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((c: any) => ({
+        id: ensureUuid(c.id || `cust_${(c.name || '').toLowerCase().trim()}`),
+        company_id: ensureUuid(companyId),
+        name: c.name || 'Unnamed Customer',
+        phone: c.phone || '',
+        gstin: c.gstin || '',
+        address: c.address || '',
+        place: c.place || c.address || '',
+        state: c.state || 'Tamil Nadu',
+        pincode: c.pincode || '',
+        balance: Number(c.balance) || 0
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('customers', Array.from(uniqueMap.values()));
+    } else if (key === 'suppliers' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((s: any) => ({
+        id: ensureUuid(s.id || `supp_${(s.name || '').toLowerCase().trim()}`),
+        company_id: ensureUuid(companyId),
+        name: s.name || 'Unnamed Supplier',
+        phone: s.phone || '',
+        gstin: s.gstin || '',
+        address: s.address || '',
+        place: s.place || s.address || '',
+        state: s.state || 'Tamil Nadu',
+        balance: Number(s.balance) || 0
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('suppliers', Array.from(uniqueMap.values()));
+    } else if (key === 'inventory' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((item: any) => ({
+        id: ensureUuid(item.id || `inv_${(item.name || '').toLowerCase().trim()}`),
+        company_id: ensureUuid(companyId),
+        name: item.name,
+        type: item.type,
+        unit: item.unit,
+        qty: Number(item.qty) || 0,
+        reorder_level: Number(item.reorderLevel) || 0
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('inventory', Array.from(uniqueMap.values()));
+    } else if (key === 'employees' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((e: any) => ({
+        id: ensureUuid(e.id || `emp_${(e.name || '').toLowerCase().trim()}`),
+        company_id: ensureUuid(companyId),
+        name: e.name,
+        role: e.role,
+        machine: e.machine || '',
+        salary: Number(e.salary) || 0
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('employees', Array.from(uniqueMap.values()));
+    } else if (key === 'purchaseBills' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((b: any) => ({
+        id: ensureUuid(b.id || `pb_${b.poNo || b.billNo || 'PB-000'}`),
+        company_id: ensureUuid(companyId),
+        bill_no: b.poNo || b.billNo || 'PB-000',
+        po_no: b.poNo || b.billNo || 'PB-000',
+        supplier_inv_no: b.supplierInvNo || '',
+        date: b.date || new Date().toISOString().split('T')[0],
+        supplier_name: b.supplierName || 'Supplier',
+        supplier_state: b.supplierState || 'Tamil Nadu',
+        subtotal: Number(b.subtotal) || 0,
+        cgst: Number(b.cgst) || 0,
+        sgst: Number(b.sgst) || 0,
+        igst: Number(b.igst) || 0,
+        grand_total: Number(b.grand) || Number(b.grandTotal) || 0,
+        status: b.status || 'paid',
+        items: b.items || []
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('purchase_bills', Array.from(uniqueMap.values()));
+    } else if (key === 'payments' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((p: any) => ({
+        id: ensureUuid(p.id || `pay_${p.date}_${p.amount}`),
+        company_id: ensureUuid(companyId),
+        customer_name: p.customerName || 'Customer',
+        date: p.date || new Date().toISOString().split('T')[0],
+        amount: Number(p.amount) || 0,
+        payment_mode: p.paymentMode || 'cash',
+        ref_no: p.note || p.refNo || ''
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('customer_payments', Array.from(uniqueMap.values()));
+    } else if (key === 'productionOrders' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((o: any) => ({
+        id: ensureUuid(o.id || `po_${o.orderNo}`),
+        company_id: ensureUuid(companyId),
+        order_no: o.orderNo,
+        customer_name: o.customerName || null,
+        order_date: o.orderDate || null,
+        delivery_due_date: o.deliveryDueDate || null,
+        status: o.status || 'in_production',
+        notes: o.notes || null,
+        items: o.items || []
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('production_orders', Array.from(uniqueMap.values()));
+    } else if (key === 'varietyCatalog' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((v: any) => ({
+        id: ensureUuid(v.id || `vc_${(v.varietyName || '').toLowerCase().trim()}`),
+        company_id: ensureUuid(companyId),
+        variety_name: v.varietyName,
+        category: v.category || null,
+        standard_weight_gsm: Number(v.standardWeightGsm) || 0,
+        target_length_cm: Number(v.targetLengthCm) || 0,
+        target_width_cm: Number(v.targetWidthCm) || 0,
+        allowed_sizing_tolerance_pct: Number(v.allowedSizingTolerancePct) || 0,
+        allowed_gsm_tolerance_pct: Number(v.allowedGsmTolerancePct) || 0,
+        warp_yarn_spec: v.warpYarnSpec || null,
+        weft_yarn_spec: v.weftYarnSpec || null,
+        pile_yarn_spec: v.pileYarnSpec || null,
+        created_date: v.createdDate || null,
+        active_status: v.activeStatus ?? true,
+        assigned_machines: v.assignedMachines || []
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('variety_catalog', Array.from(uniqueMap.values()));
+    } else if (key === 'qualityAudits' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((q: any) => ({
+        id: ensureUuid(q.id || `qa_${q.checkDate}_${q.machineNo}`),
+        company_id: ensureUuid(companyId),
+        check_date: q.checkDate || null,
+        check_time: q.checkTime || null,
+        machine_no: q.machineNo || null,
+        variety_name: q.varietyName || null,
+        operator_name: q.operatorName || null,
+        sample_no: Number(q.sampleNo) || 1,
+        actual_length_cm: Number(q.actualLengthCm) || 0,
+        actual_width_cm: Number(q.actualWidthCm) || 0,
+        actual_weight_gsm: Number(q.actualWeightGsm) || 0,
+        border_quality_score: Number(q.borderQualityScore) || 0,
+        selvedge_condition: q.selvedgeCondition || null,
+        sizing_status: q.sizingStatus || null,
+        gsm_status: q.gsmStatus || null,
+        overall_result: q.overallResult || 'PASS',
+        variance_notes: q.varianceNotes || null,
+        action_taken: q.actionTaken || null,
+        auditor_name: q.auditorName || null
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('quality_audits', Array.from(uniqueMap.values()));
+    } else if (key === 'routineReminders' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((r: any) => ({
+        id: ensureUuid(r.id || `rr_${(r.taskTitle || '').toLowerCase().trim()}`),
+        company_id: ensureUuid(companyId),
+        task_title: r.taskTitle,
+        machine_no: r.machineNo || null,
+        category: r.category || null,
+        frequency_days: Number(r.frequencyDays) || 1,
+        last_checked_date: r.lastCheckedDate || null,
+        next_due_date: r.nextDueDate || null,
+        assigned_role_or_person: r.assignedRoleOrPerson || null,
+        status: r.status || 'pending',
+        checklist_items: r.checklistItems || [],
+        notes: r.notes || null
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('routine_reminders', Array.from(uniqueMap.values()));
+    } else if (key === 'productionLogs' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((pl: any) => ({
+        id: ensureUuid(pl.id || `pl_${pl.logDate}_${pl.machineNo}`),
+        company_id: ensureUuid(companyId),
+        log_date: pl.logDate || null,
+        shift: pl.shift || null,
+        machine_no: pl.machineNo || null,
+        operator_name: pl.operatorName || null,
+        meters_produced: Number(pl.metersProduced) || 0,
+        picks: Number(pl.picks) || 0,
+        efficiency_pct: Number(pl.efficiencyPct) || 0,
+        notes: pl.notes || null
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('production_logs', Array.from(uniqueMap.values()));
+    } else if (key === 'salaryAdvances' && Array.isArray(val) && val.length > 0) {
+      const rows = val.map((sa: any) => ({
+        id: ensureUuid(sa.id || `sa_${sa.employeeName}_${sa.advanceDate}`),
+        company_id: ensureUuid(companyId),
+        employee_id: sa.employeeId ? ensureUuid(sa.employeeId) : null,
+        employee_name: sa.employeeName || null,
+        advance_date: sa.advanceDate || null,
+        amount: Number(sa.amount) || 0,
+        repayment_status: sa.repaymentStatus || 'pending',
+        notes: sa.notes || null
+      }));
+      const uniqueMap = new Map<string, any>();
+      rows.forEach(r => uniqueMap.set(r.id, r));
+      await safeUpsertRelationalTable('salary_advances', Array.from(uniqueMap.values()));
+    }
+  } catch (err: any) {
+    console.warn(`Relational sync exception for key [${key}]:`, err?.message || String(err));
+  }
+}
+
 export async function storeSet<T>(key: string, val: T): Promise<void> {
   try {
     localStorage.setItem(scopedKey(key), JSON.stringify(val));
@@ -377,170 +703,10 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
         console.log(`✅ Supabase state saved successfully to app_state [key: ${key}, company: ${companyId}]`);
       }
 
-      // Also mirror to dedicated relational table if available (safe try-catch)
-      try {
-        if (key === 'salesBills' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((b: any) => ({
-            id: ensureUuid(b.id || `sb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`),
-            company_id: ensureUuid(companyId),
-            bill_no: b.billNo || 'VC-000',
-            date: b.date || new Date().toISOString().split('T')[0],
-            customer_name: b.customerName || 'Customer',
-            customer_state: b.customerState || 'Tamil Nadu',
-            subtotal: Number(b.subtotal) || 0,
-            cgst: Number(b.cgst) || 0,
-            sgst: Number(b.sgst) || 0,
-            igst: Number(b.igst) || 0,
-            grand: Number(b.grand) || Number(b.grandTotal) || 0,
-            status: (b.status === 'paid' || b.status === 'unpaid') ? b.status : 'unpaid',
-            items: b.items || []
-          }));
-          await client.from('sales_bills').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'customers' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((c: any) => ({
-            id: c.id || `cust_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            name: c.name,
-            phone: c.phone || null,
-            gstin: c.gstin || null,
-            address: c.address || null,
-            state: c.state || 'Tamil Nadu',
-            pincode: c.pincode || null,
-            balance: 0
-          }));
-          await client.from('customers').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'suppliers' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((s: any) => ({
-            id: s.id || `supp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            name: s.name,
-            phone: s.phone || null,
-            gstin: s.gstin || null,
-            address: s.address || null,
-            balance: 0
-          }));
-          await client.from('suppliers').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'inventory' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((item: any) => ({
-            id: item.id || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            name: item.name,
-            type: item.type,
-            unit: item.unit,
-            qty: item.qty || 0,
-            reorder_level: item.reorderLevel || 0
-          }));
-          await client.from('inventory').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'employees' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((e: any) => ({
-            id: e.id || `emp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            name: e.name,
-            role: e.role,
-            machine: e.machine || null,
-            salary: e.salary || 0
-          }));
-          await client.from('employees').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'purchaseBills' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((b: any) => ({
-            id: b.id || `pb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            bill_no: b.billNo || 'PB-000',
-            date: b.date || new Date().toISOString().split('T')[0],
-            supplier_name: b.supplierName || 'Supplier',
-            grand_total: b.grandTotal || 0,
-            status: b.status || 'paid',
-            items: b.items || []
-          }));
-          await client.from('purchase_bills').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'payments' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((p: any) => ({
-            id: p.id || `pay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            customer_name: p.customerName || 'Customer',
-            date: p.date || new Date().toISOString().split('T')[0],
-            amount: p.amount || 0,
-            payment_mode: p.paymentMode || 'cash',
-            ref_no: p.refNo || null
-          }));
-          await client.from('customer_payments').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'productionOrders' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((o: any) => ({
-            id: o.id || `po_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            order_no: o.orderNo,
-            customer_name: o.customerName || null,
-            order_date: o.orderDate || null,
-            delivery_due_date: o.deliveryDueDate || null,
-            status: o.status || 'in_production',
-            notes: o.notes || null,
-            items: o.items || []
-          }));
-          await client.from('production_orders').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'varietyCatalog' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((v: any) => ({
-            id: v.id || `vc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            variety_name: v.varietyName,
-            category: v.category || null,
-            standard_weight_gsm: v.standardWeightGsm || 0,
-            target_length_cm: v.targetLengthCm || 0,
-            target_width_cm: v.targetWidthCm || 0,
-            allowed_sizing_tolerance_pct: v.allowedSizingTolerancePct || 0,
-            allowed_gsm_tolerance_pct: v.allowedGsmTolerancePct || 0,
-            warp_yarn_spec: v.warpYarnSpec || null,
-            weft_yarn_spec: v.weftYarnSpec || null,
-            pile_yarn_spec: v.pileYarnSpec || null,
-            created_date: v.createdDate || null,
-            active_status: v.activeStatus ?? true,
-            assigned_machines: v.assignedMachines || []
-          }));
-          await client.from('variety_catalog').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'qualityAudits' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((q: any) => ({
-            id: q.id || `qa_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            check_date: q.checkDate || null,
-            check_time: q.checkTime || null,
-            machine_no: q.machineNo || null,
-            variety_name: q.varietyName || null,
-            operator_name: q.operatorName || null,
-            sample_no: q.sampleNo || 1,
-            actual_length_cm: q.actualLengthCm || 0,
-            actual_width_cm: q.actualWidthCm || 0,
-            actual_weight_gsm: q.actualWeightGsm || 0,
-            border_quality_score: q.borderQualityScore || 0,
-            selvedge_condition: q.selvedgeCondition || null,
-            sizing_status: q.sizingStatus || null,
-            gsm_status: q.gsmStatus || null,
-            overall_result: q.overallResult || 'PASS',
-            variance_notes: q.varianceNotes || null,
-            action_taken: q.actionTaken || null,
-            auditor_name: q.auditorName || null
-          }));
-          await client.from('quality_audits').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'routineReminders' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((r: any) => ({
-            id: r.id || `rr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            task_title: r.taskTitle,
-            machine_no: r.machineNo || null,
-            category: r.category || null,
-            frequency_days: r.frequencyDays || 1,
-            last_checked_date: r.lastCheckedDate || null,
-            next_due_date: r.nextDueDate || null,
-            assigned_role_or_person: r.assignedRoleOrPerson || null,
-            status: r.status || 'pending',
-            checklist_items: r.checklistItems || [],
-            notes: r.notes || null
-          }));
-          await client.from('routine_reminders').upsert(rows, { onConflict: 'id' });
-        }
-      } catch (relErr: any) {
-        console.warn(`Relational mirror sync notice for ${key}:`, relErr?.message || relErr);
-      }
-    } catch (e) {
-      console.warn('Real-time Supabase sync warning:', e);
+      // Mirror to dedicated relational table
+      await syncPayloadToRelationalTable(companyId, key, val);
+    } catch (e: any) {
+      console.warn('Real-time Supabase sync warning:', e?.message || e);
     }
   }
 }
@@ -687,183 +853,8 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
         lastError = appStateErr.message;
       }
 
-      // 2. Relational table sync (safe background execution)
-      try {
-        if (key === 'companySettings' && val && typeof val === 'object') {
-          const s = val as any;
-          await client.from('company_settings').upsert({
-            id: companyId,
-            company_id: companyId,
-            name: s.name || '',
-            address: s.address || '',
-            phone: s.phone || '',
-            gstin: s.gstin || '',
-            state: s.state || 'Tamil Nadu',
-            pincode: s.pincode || '',
-            bank_name: s.bankName || '',
-            bank_account: s.bankAccount || '',
-            bank_ifsc: s.bankIfsc || '',
-            bank_branch: s.bankBranch || '',
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'id' });
-        } else if (key === 'salesBills' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((b: SalesBill) => ({
-            id: ensureUuid(b.id || `sb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`),
-            company_id: ensureUuid(companyId),
-            bill_no: b.billNo || 'VC-000',
-            date: b.date || new Date().toISOString().split('T')[0],
-            customer_name: b.customerName || 'Customer',
-            customer_state: b.customerState || 'Tamil Nadu',
-            subtotal: Number(b.subtotal) || 0,
-            cgst: Number(b.cgst) || 0,
-            sgst: Number(b.sgst) || 0,
-            igst: Number(b.igst) || 0,
-            grand: Number(b.grand) || 0,
-            status: (b.status === 'paid' || b.status === 'unpaid') ? b.status : 'unpaid',
-            items: b.items || []
-          }));
-          await client.from('sales_bills').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'customers' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((c: Customer) => ({
-            id: c.id || `cust_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            name: c.name,
-            phone: c.phone || null,
-            gstin: c.gstin || null,
-            address: c.address || null,
-            state: c.state || 'Tamil Nadu',
-            pincode: c.pincode || null,
-            balance: 0
-          }));
-          await client.from('customers').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'suppliers' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((s: Supplier) => ({
-            id: s.id || `supp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            name: s.name,
-            phone: s.phone || null,
-            gstin: s.gstin || null,
-            address: s.address || null,
-            balance: 0
-          }));
-          await client.from('suppliers').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'inventory' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((item: InventoryItem) => ({
-            id: item.id || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            name: item.name,
-            type: item.type,
-            unit: item.unit,
-            qty: item.qty || 0,
-            reorder_level: item.reorderLevel || 0
-          }));
-          await client.from('inventory').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'employees' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((e: Employee) => ({
-            id: e.id || `emp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            name: e.name,
-            role: e.role,
-            machine: e.machine || null,
-            salary: e.salary || 0
-          }));
-          await client.from('employees').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'purchaseBills' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((b: any) => ({
-            id: b.id || `pb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            bill_no: b.poNo || b.billNo || 'PB-000',
-            date: b.date || new Date().toISOString().split('T')[0],
-            supplier_name: b.supplierName || 'Supplier',
-            grand_total: b.grand || b.grandTotal || 0,
-            status: b.status || 'paid',
-            items: b.items || []
-          }));
-          await client.from('purchase_bills').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'payments' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((p: any) => ({
-            id: p.id || `pay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            customer_name: p.customerName || 'Customer',
-            date: p.date || new Date().toISOString().split('T')[0],
-            amount: p.amount || 0,
-            payment_mode: 'cash',
-            ref_no: p.note || null
-          }));
-          await client.from('customer_payments').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'productionOrders' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((o: ProductionOrder) => ({
-            id: o.id || `po_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            order_no: o.orderNo,
-            customer_name: o.customerName || null,
-            order_date: o.orderDate || null,
-            delivery_due_date: o.deliveryDueDate || null,
-            status: o.status || 'in_production',
-            notes: o.notes || null,
-            items: o.items || []
-          }));
-          await client.from('production_orders').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'varietyCatalog' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((v: VarietyCatalog) => ({
-            id: v.id || `vc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            variety_name: v.varietyName,
-            category: v.category || null,
-            standard_weight_gsm: v.standardWeightGsm || 0,
-            target_length_cm: v.targetLengthCm || 0,
-            target_width_cm: v.targetWidthCm || 0,
-            allowed_sizing_tolerance_pct: v.allowedSizingTolerancePct || 0,
-            allowed_gsm_tolerance_pct: v.allowedGsmTolerancePct || 0,
-            warp_yarn_spec: v.warpYarnSpec || null,
-            weft_yarn_spec: v.weftYarnSpec || null,
-            pile_yarn_spec: v.pileYarnSpec || null,
-            created_date: v.createdDate || null,
-            active_status: v.activeStatus ?? true,
-            assigned_machines: v.assignedMachines || []
-          }));
-          await client.from('variety_catalog').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'qualityAudits' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((q: QualityCheckAudit) => ({
-            id: q.id || `qa_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            check_date: q.checkDate || null,
-            check_time: q.checkTime || null,
-            machine_no: q.machineNo || null,
-            variety_name: q.varietyName || null,
-            operator_name: q.operatorName || null,
-            sample_no: q.sampleNo || 1,
-            actual_length_cm: q.actualLengthCm || 0,
-            actual_width_cm: q.actualWidthCm || 0,
-            actual_weight_gsm: q.actualWeightGsm || 0,
-            border_quality_score: q.borderQualityScore || 0,
-            selvedge_condition: q.selvedgeCondition || null,
-            sizing_status: q.sizingStatus || null,
-            gsm_status: q.gsmStatus || null,
-            overall_result: q.overallResult || 'PASS',
-            variance_notes: q.varianceNotes || null,
-            action_taken: q.actionTaken || null,
-            auditor_name: q.auditorName || null
-          }));
-          await client.from('quality_audits').upsert(rows, { onConflict: 'id' });
-        } else if (key === 'routineReminders' && Array.isArray(val) && val.length > 0) {
-          const rows = val.map((r: RoutineTaskReminder) => ({
-            id: r.id || `rr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            company_id: companyId,
-            task_title: r.taskTitle,
-            machine_no: r.machineNo || null,
-            category: r.category || null,
-            frequency_days: r.frequencyDays || 1,
-            last_checked_date: r.lastCheckedDate || null,
-            next_due_date: r.nextDueDate || null,
-            assigned_role_or_person: r.assignedRoleOrPerson || null,
-            status: r.status || 'pending',
-            checklist_items: r.checklistItems || [],
-            notes: r.notes || null
-          }));
-          await client.from('routine_reminders').upsert(rows, { onConflict: 'id' });
-        }
-      } catch (e) {}
+      // 2. Relational table sync
+      await syncPayloadToRelationalTable(companyId, key, val);
 
       return true;
     } catch (err: any) {
@@ -898,7 +889,7 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
             bank_ifsc: c.bankIfsc || null,
             is_default: Boolean(c.isDefault)
           }));
-          await client.from('companies').upsert(compRows, { onConflict: 'id' });
+          await safeUpsertRelationalTable('companies', compRows);
         }
       }
     } catch (e) {}

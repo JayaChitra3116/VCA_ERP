@@ -333,21 +333,28 @@ export default function App() {
         rRems
       ] = await Promise.race([loadPromise, timeoutPromise]);
 
+      const activeElem = document.activeElement;
+      const isUserTyping = Boolean(activeElem && ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeElem.tagName));
+
       setCompanies(comps);
-      setSettings(setts);
-      setCustomers(custs);
-      setSuppliers(supps);
-      setInventory(inv);
-      setSalesBills(sBills);
-      setPurchaseBills(pBills);
-      setPayments(pmts);
-      setEmployees(emps);
-      setProductionLogs(pLogs);
-      setSalaryAdvances(sAdvs);
-      setProductionOrders(pOrders);
-      setVarieties(vars);
-      setQualityAudits(qAudits);
-      setRoutineReminders(rRems);
+      if (!isSilent || (!isUserTyping && activePage !== 'settings')) {
+        setSettings(setts);
+      }
+      if (!isSilent || !isUserTyping) {
+        setCustomers(custs);
+        setSuppliers(supps);
+        setInventory(inv);
+        setSalesBills(sBills);
+        setPurchaseBills(pBills);
+        setPayments(pmts);
+        setEmployees(emps);
+        setProductionLogs(pLogs);
+        setSalaryAdvances(sAdvs);
+        setProductionOrders(pOrders);
+        setVarieties(vars);
+        setQualityAudits(qAudits);
+        setRoutineReminders(rRems);
+      }
 
       const activeId = getActiveCompanyId();
       setCompanyIdState(activeId);

@@ -90,6 +90,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
 
     const newCustomer: Customer = {
       ...form,
+      id: crypto.randomUUID(),
       name: form.name.trim(),
       address: form.address || form.place
     };

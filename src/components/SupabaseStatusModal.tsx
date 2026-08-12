@@ -17,10 +17,16 @@ interface SupabaseStatusModalProps {
 const SQL_FIX_SCRIPT = `-- Supabase SQL Permissions & Schema Fix Script
 -- Copy & paste into Supabase Dashboard -> SQL Editor -> Click RUN
 
-GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
-GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
-GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+-- Option A: Keep RLS ENABLED and allow app access via policies (Recommended for Security)
+CREATE POLICY "Allow public read-write on app_state" ON public.app_state FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read-write on customers" ON public.customers FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read-write on sales_bills" ON public.sales_bills FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read-write on suppliers" ON public.suppliers FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read-write on inventory" ON public.inventory FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read-write on companies" ON public.companies FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read-write on company_settings" ON public.company_settings FOR ALL USING (true) WITH CHECK (true);
 
+-- Option B: Or Disable RLS completely if policies are not needed
 ALTER TABLE IF EXISTS public.app_state DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.companies DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.company_settings DISABLE ROW LEVEL SECURITY;
@@ -37,6 +43,21 @@ ALTER TABLE IF EXISTS public.routine_reminders DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.employees DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.production_logs DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.salary_advances DISABLE ROW LEVEL SECURITY;
+
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+
+-- Schema Column Compatibility Fixes
+ALTER TABLE IF EXISTS public.customers ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE IF EXISTS public.customers ADD COLUMN IF NOT EXISTS place TEXT;
+
+ALTER TABLE IF EXISTS public.company_settings ADD COLUMN IF NOT EXISTS address TEXT;
+
+ALTER TABLE IF EXISTS public.sales_bills ADD COLUMN IF NOT EXISTS customer_address TEXT;
+ALTER TABLE IF EXISTS public.sales_bills ADD COLUMN IF NOT EXISTS customer_phone TEXT;
+ALTER TABLE IF EXISTS public.sales_bills ADD COLUMN IF NOT EXISTS customer_gstin TEXT;
+ALTER TABLE IF EXISTS public.sales_bills ADD COLUMN IF NOT EXISTS grand_total NUMERIC;
 `;
 
 export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClose, onRefreshData }) => {
