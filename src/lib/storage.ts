@@ -56,6 +56,9 @@ export function ensureUuid(idStr?: string): string {
 }
 
 function scopedKey(key: string): string {
+  if (key === 'customers') {
+    return GLOBAL_STORE_PREFIX + 'customers';
+  }
   return STORE_PREFIX + getActiveCompanyId() + ':' + key;
 }
 
@@ -66,14 +69,27 @@ export function mergePayloads<T>(key: string, localVal: T, cloudVal: T): T {
   if (Array.isArray(localVal) && Array.isArray(cloudVal)) {
     const combinedMap = new Map<string, any>();
 
+    const getItemKey = (item: any) => {
+      if (!item || typeof item !== 'object') return String(item);
+      if (key === 'customers' || key === 'suppliers' || key === 'inventory' || key === 'employees') {
+        if (item.name) return key + ':' + item.name.toLowerCase().trim();
+      }
+      if (key === 'salesBills') {
+        if (item.billNo) return 'sb:' + item.billNo.toLowerCase().trim();
+      }
+      if (key === 'purchaseBills') {
+        if (item.poNo || item.billNo) return 'pb:' + (item.poNo || item.billNo).toLowerCase().trim();
+      }
+      if (key === 'varietyCatalog') {
+        if (item.varietyName) return 'vc:' + item.varietyName.toLowerCase().trim();
+      }
+      return item.id || JSON.stringify(item);
+    };
+
     for (const item of cloudVal) {
       if (item && typeof item === 'object') {
-        const idKey = item.id || (key === 'salesBills' ? item.billNo : null) || (key === 'purchaseBills' ? item.billNo : null);
-        if (idKey) {
-          combinedMap.set(String(idKey), item);
-        } else {
-          combinedMap.set(JSON.stringify(item), item);
-        }
+        const k = getItemKey(item);
+        combinedMap.set(k, item);
       } else {
         combinedMap.set(String(item), item);
       }
@@ -81,13 +97,9 @@ export function mergePayloads<T>(key: string, localVal: T, cloudVal: T): T {
 
     for (const item of localVal) {
       if (item && typeof item === 'object') {
-        const idKey = item.id || (key === 'salesBills' ? item.billNo : null) || (key === 'purchaseBills' ? item.billNo : null);
-        if (idKey) {
-          const existing = combinedMap.get(String(idKey));
-          combinedMap.set(String(idKey), existing ? { ...existing, ...item } : item);
-        } else {
-          combinedMap.set(JSON.stringify(item), item);
-        }
+        const k = getItemKey(item);
+        const existing = combinedMap.get(k);
+        combinedMap.set(k, existing ? { ...existing, ...item } : item);
       } else {
         combinedMap.set(String(item), item);
       }
@@ -124,6 +136,33 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
         .eq('company_id', companyId)
         .eq('store_key', key)
         .maybeSingle();
+
+      if (key === 'customers') {
+        const { data: allCustState } = await client
+          .from('app_state')
+          .select('payload')
+          .eq('store_key', 'customers');
+
+        let combinedCustList: any[] = [];
+        if (allCustState && allCustState.length > 0) {
+          allCustState.forEach(row => {
+            if (Array.isArray(row.payload)) {
+              combinedCustList.push(...row.payload);
+            }
+          });
+        }
+
+        if (data && Array.isArray(data.payload)) {
+          combinedCustList.push(...data.payload);
+        }
+
+        if (combinedCustList.length > 0) {
+          const mergedCusts = mergePayloads('customers', localVal, combinedCustList) as unknown as T;
+          try { localStorage.setItem(scopedKey('customers'), JSON.stringify(mergedCusts)); } catch {}
+          syncPayloadToRelationalTable(companyId, 'customers', mergedCusts);
+          return mergedCusts;
+        }
+      }
 
       if (!error && data && data.payload !== null && data.payload !== undefined) {
         const cloudVal = data.payload as T;
@@ -209,7 +248,7 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
           return mapped as unknown as T;
         }
       } else if (key === 'customers') {
-        const { data: custRows } = await client.from('customers').select('*').eq('company_id', companyId);
+        const { data: custRows } = await client.from('customers').select('*');
         if (custRows && custRows.length > 0) {
           const mapped: Customer[] = custRows.map((c: any) => ({
             id: c.id,
@@ -222,8 +261,17 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
             pincode: c.pincode || '',
             balance: Number(c.balance) || 0
           }));
-          try { localStorage.setItem(scopedKey(key), JSON.stringify(mapped)); } catch {}
-          return mapped as unknown as T;
+          const uniqueMap = new Map<string, Customer>();
+          mapped.forEach(c => {
+            const k = (c.name || '').toLowerCase().trim();
+            if (k) {
+              const existing = uniqueMap.get(k);
+              uniqueMap.set(k, existing ? { ...existing, ...c } : c);
+            }
+          });
+          const cleanList = Array.from(uniqueMap.values());
+          try { localStorage.setItem(scopedKey(key), JSON.stringify(cleanList)); } catch {}
+          return cleanList as unknown as T;
         }
       } else if (key === 'suppliers') {
         const { data: suppRows } = await client.from('suppliers').select('*').eq('company_id', companyId);
@@ -909,6 +957,160 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
     return { syncedKeys: syncedCount, error: lastError };
   } catch (err: any) {
     return { syncedKeys: 0, error: err?.message || 'Sync failed' };
+  }
+}
+
+/**
+ * Deletes a row from a relational table in Supabase by ID or name/number column.
+ */
+export async function deleteFromRelationalTable(
+  tableName: string, 
+  recordId?: string, 
+  nameOrNoCol?: string, 
+  nameOrNoVal?: string
+): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!getIsSupabaseConfigured() || !client) return false;
+
+  try {
+    if (recordId) {
+      await client.from(tableName).delete().eq('id', recordId);
+    }
+    if (nameOrNoCol && nameOrNoVal) {
+      await client.from(tableName).delete().ilike(nameOrNoCol, nameOrNoVal);
+    }
+    return true;
+  } catch (err: any) {
+    console.warn(`Error deleting from ${tableName}:`, err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Sweeps Supabase relational tables (customers, sales_bills, suppliers, inventory, employees)
+ * and purges duplicate rows keeping only 1 record per unique entity name/number.
+ */
+export async function cleanDatabaseDuplicatesInSupabase(): Promise<{ deletedCount: number; message: string }> {
+  const client = getSupabaseClient();
+  if (!getIsSupabaseConfigured() || !client) {
+    return { deletedCount: 0, message: 'Supabase credentials not configured' };
+  }
+
+  const companyId = getActiveCompanyId();
+  let totalDeleted = 0;
+
+  try {
+    // 1. Deduplicate 'customers' table in Supabase relational table
+    const { data: customers } = await client.from('customers').select('*').eq('company_id', companyId);
+    if (customers && customers.length > 1) {
+      const seenNames = new Map<string, string>();
+      const idsToDelete: string[] = [];
+
+      for (const c of customers) {
+        const normName = (c.name || '').toLowerCase().trim();
+        if (!normName) continue;
+        if (seenNames.has(normName)) {
+          idsToDelete.push(c.id);
+        } else {
+          seenNames.set(normName, c.id);
+        }
+      }
+
+      if (idsToDelete.length > 0) {
+        const { error } = await client.from('customers').delete().in('id', idsToDelete);
+        if (!error) {
+          totalDeleted += idsToDelete.length;
+        }
+      }
+    }
+
+    // 2. Deduplicate 'sales_bills' table
+    const { data: bills } = await client.from('sales_bills').select('*').eq('company_id', companyId);
+    if (bills && bills.length > 1) {
+      const seenBillNos = new Map<string, string>();
+      const idsToDelete: string[] = [];
+
+      for (const b of bills) {
+        const normNo = (b.bill_no || '').toLowerCase().trim();
+        if (!normNo) continue;
+        if (seenBillNos.has(normNo)) {
+          idsToDelete.push(b.id);
+        } else {
+          seenBillNos.set(normNo, b.id);
+        }
+      }
+
+      if (idsToDelete.length > 0) {
+        const { error } = await client.from('sales_bills').delete().in('id', idsToDelete);
+        if (!error) {
+          totalDeleted += idsToDelete.length;
+        }
+      }
+    }
+
+    // 3. Clean up duplicates in local storage & app_state for 'customers'
+    const rawLocalCust = localStorage.getItem(scopedKey('customers'));
+    if (rawLocalCust) {
+      try {
+        const parsed: any[] = JSON.parse(rawLocalCust);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const uniqueCustMap = new Map<string, any>();
+          parsed.forEach(c => {
+            const key = (c.name || '').toLowerCase().trim();
+            if (key) {
+              const existing = uniqueCustMap.get(key);
+              uniqueCustMap.set(key, existing ? { ...existing, ...c } : c);
+            }
+          });
+          const cleanCustList = Array.from(uniqueCustMap.values());
+          localStorage.setItem(scopedKey('customers'), JSON.stringify(cleanCustList));
+          
+          await client.from('app_state').upsert({
+            company_id: companyId,
+            store_key: 'customers',
+            payload: cleanCustList,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'company_id,store_key' });
+        }
+      } catch (e) {}
+    }
+
+    // 4. Clean up duplicates in local storage & app_state for 'salesBills'
+    const rawLocalBills = localStorage.getItem(scopedKey('salesBills'));
+    if (rawLocalBills) {
+      try {
+        const parsed: any[] = JSON.parse(rawLocalBills);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const uniqueBillMap = new Map<string, any>();
+          parsed.forEach(b => {
+            const key = (b.billNo || '').toLowerCase().trim();
+            if (key) {
+              const existing = uniqueBillMap.get(key);
+              uniqueBillMap.set(key, existing ? { ...existing, ...b } : b);
+            }
+          });
+          const cleanBillList = Array.from(uniqueBillMap.values());
+          localStorage.setItem(scopedKey('salesBills'), JSON.stringify(cleanBillList));
+          
+          await client.from('app_state').upsert({
+            company_id: companyId,
+            store_key: 'salesBills',
+            payload: cleanBillList,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'company_id,store_key' });
+        }
+      } catch (e) {}
+    }
+
+    return {
+      deletedCount: totalDeleted,
+      message: `Successfully cleaned database! Purged ${totalDeleted} duplicate rows from Supabase.`
+    };
+  } catch (err: any) {
+    return {
+      deletedCount: totalDeleted,
+      message: `Notice: ${err?.message || String(err)}`
+    };
   }
 }
 

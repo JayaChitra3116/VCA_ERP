@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { InventoryItem } from '../types';
-import { storeSet } from '../lib/storage';
+import { storeSet, deleteFromRelationalTable } from '../lib/storage';
 import {
   Package,
   Plus,
@@ -13,7 +13,8 @@ import {
   Save,
   Layers,
   Sparkles,
-  X
+  X,
+  Trash2
 } from 'lucide-react';
 
 interface InventoryTabProps {
@@ -66,6 +67,17 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
     if (activeFilter === 'low') return item.qty <= item.reorderLevel;
     return true;
   });
+
+  // Delete Inventory Item
+  const handleDeleteInventoryItem = async (item: InventoryItem) => {
+    if (!window.confirm(`Are you sure you want to delete inventory item "${item.name}"?`)) return;
+
+    const updated = inventory.filter((i) => i.id !== item.id && i.name.toLowerCase().trim() !== item.name.toLowerCase().trim());
+    setInventory(updated);
+    await storeSet('inventory', updated);
+    await deleteFromRelationalTable('inventory', item.id, 'name', item.name);
+    showToast(`Inventory item "${item.name}" deleted!`);
+  };
 
   // Save Stock Form
   const handleSaveStock = async () => {
@@ -282,23 +294,33 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
                         </span>
                       </td>
                       <td className="p-2.5 text-center">
-                        <button
-                          onClick={() => {
-                            setStockForm({
-                              itemName: item.name,
-                              type: item.type,
-                              action: 'add',
-                              qty: 50,
-                              unit: item.unit,
-                              reorderLevel: item.reorderLevel,
-                              notes: ''
-                            });
-                            setShowStockModal(true);
-                          }}
-                          className="px-2.5 py-1 rounded bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold border border-teal-200 text-[11px] transition-colors cursor-pointer"
-                        >
-                          + Add / Adjust
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              setStockForm({
+                                itemName: item.name,
+                                type: item.type,
+                                action: 'add',
+                                qty: 50,
+                                unit: item.unit,
+                                reorderLevel: item.reorderLevel,
+                                notes: ''
+                              });
+                              setShowStockModal(true);
+                            }}
+                            className="px-2.5 py-1 rounded bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold border border-teal-200 text-[11px] transition-colors cursor-pointer"
+                          >
+                            + Add / Adjust
+                          </button>
+
+                          <button
+                            onClick={() => handleDeleteInventoryItem(item)}
+                            className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded border border-rose-200 transition-colors cursor-pointer"
+                            title="Delete Item"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Customer, SalesBill, CustomerPayment, CompanySettings } from '../types';
-import { storeSet } from '../lib/storage';
+import { storeSet, deleteFromRelationalTable } from '../lib/storage';
 import {
   UserCheck,
   Plus,
@@ -175,6 +175,17 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
     }
     await storeSet('payments', updatedPayments);
     showToast(`Payment deleted for ${custName}`);
+  };
+
+  // Handle Delete Customer
+  const handleDeleteCustomer = async (cust: Customer) => {
+    if (!window.confirm(`Are you sure you want to delete customer "${cust.name}"? This action cannot be undone.`)) return;
+
+    const updated = customers.filter((c) => c.id !== cust.id && c.name.toLowerCase().trim() !== cust.name.toLowerCase().trim());
+    setCustomers(updated);
+    await storeSet('customers', updated);
+    await deleteFromRelationalTable('customers', cust.id, 'name', cust.name);
+    showToast(`Customer "${cust.name}" deleted successfully!`);
   };
 
   // Helper: Get financial stats for a given customer name
@@ -596,6 +607,14 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
                           >
                             <Plus className="w-3.5 h-3.5 text-emerald-600" />
                             <span>Payment</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleDeleteCustomer(c)}
+                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg border border-rose-200 transition-colors cursor-pointer"
+                            title="Delete Customer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>

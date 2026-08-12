@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Employee, SalaryAdvance } from '../types';
-import { storeSet } from '../lib/storage';
+import { storeSet, deleteFromRelationalTable } from '../lib/storage';
 import {
   Users,
   UserPlus,
@@ -105,6 +105,16 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({
   // Stat Calculations
   const totalPayroll = employees.reduce((s, e) => s + (e.salary || 0), 0);
   const totalAdvances = salaryAdvances.reduce((s, a) => s + (a.amount || 0), 0);
+
+  const handleDeleteEmployee = async (emp: Employee) => {
+    if (!window.confirm(`Are you sure you want to delete employee "${emp.name}"?`)) return;
+
+    const updated = employees.filter((e) => e.id !== emp.id && e.name.toLowerCase().trim() !== emp.name.toLowerCase().trim());
+    setEmployees(updated);
+    await storeSet('employees', updated);
+    await deleteFromRelationalTable('employees', emp.id, 'name', emp.name);
+    showToast(`Employee "${emp.name}" deleted!`);
+  };
 
   return (
     <div className="space-y-6">
@@ -382,15 +392,25 @@ export const EmployeesTab: React.FC<EmployeesTabProps> = ({
                         ₹{netPayable.toLocaleString('en-IN')}
                       </td>
                       <td className="p-2.5 text-center">
-                        <button
-                          onClick={() => {
-                            setAdvEmpId(e.id);
-                            setSubView('advance');
-                          }}
-                          className="px-2.5 py-1 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold border border-amber-200 text-[11px] transition-colors cursor-pointer"
-                        >
-                          + Advance
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              setAdvEmpId(e.id);
+                              setSubView('advance');
+                            }}
+                            className="px-2.5 py-1 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold border border-amber-200 text-[11px] transition-colors cursor-pointer"
+                          >
+                            + Advance
+                          </button>
+
+                          <button
+                            onClick={() => handleDeleteEmployee(e)}
+                            className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded border border-rose-200 transition-colors cursor-pointer"
+                            title="Delete Employee"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

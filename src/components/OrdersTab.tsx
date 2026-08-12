@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ProductionOrder, OrderItem } from '../types';
-import { Plus, Search, Eye, Calendar, User, ShoppingBag, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { storeSet, deleteFromRelationalTable } from '../lib/storage';
+import { Plus, Search, Eye, Calendar, User, ShoppingBag, CheckCircle, Clock, AlertCircle, Trash2 } from 'lucide-react';
 
 interface OrdersTabProps {
   orders: ProductionOrder[];
@@ -102,6 +103,15 @@ export const OrdersTab: React.FC<OrdersTabProps> = ({
       default:
         return <span className="pill">{status}</span>;
     }
+  };
+
+  const handleDeleteOrder = async (order: ProductionOrder) => {
+    if (!window.confirm(`Are you sure you want to delete production order "${order.orderNo}"?`)) return;
+
+    const updated = orders.filter((o) => o.id !== order.id && o.orderNo.toLowerCase().trim() !== order.orderNo.toLowerCase().trim());
+    await storeSet('productionOrders', updated);
+    await deleteFromRelationalTable('production_orders', order.id, 'po_no', order.orderNo);
+    window.location.reload();
   };
 
   return (
@@ -241,6 +251,14 @@ export const OrdersTab: React.FC<OrdersTabProps> = ({
                             <option value="completed">Completed</option>
                             <option value="cancelled">Cancelled</option>
                           </select>
+
+                          <button
+                            onClick={() => handleDeleteOrder(order)}
+                            className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded border border-rose-200 transition-colors cursor-pointer"
+                            title="Delete Production Order"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </td>
                     </tr>

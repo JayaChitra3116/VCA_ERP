@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Supplier } from '../types';
-import { storeSet } from '../lib/storage';
-import { Truck, Plus, Save, Search, X } from 'lucide-react';
+import { storeSet, deleteFromRelationalTable } from '../lib/storage';
+import { Truck, Plus, Save, Search, X, Trash2 } from 'lucide-react';
 
 interface SuppliersTabProps {
   suppliers: Supplier[];
@@ -48,6 +48,16 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
       state: 'Tamil Nadu',
       gstin: ''
     });
+  };
+
+  const handleDeleteSupplier = async (sup: Supplier) => {
+    if (!window.confirm(`Are you sure you want to delete supplier "${sup.name}"?`)) return;
+
+    const updated = suppliers.filter((s) => s.id !== sup.id && s.name.toLowerCase().trim() !== sup.name.toLowerCase().trim());
+    setSuppliers(updated);
+    await storeSet('suppliers', updated);
+    await deleteFromRelationalTable('suppliers', sup.id, 'name', sup.name);
+    showToast(`Supplier "${sup.name}" deleted successfully!`);
   };
 
   const filtered = suppliers.filter(
@@ -104,12 +114,13 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
                 <th className="p-2.5">Place / City</th>
                 <th className="p-2.5">State</th>
                 <th className="p-2.5 font-mono">GSTIN No.</th>
+                <th className="p-2.5 text-center">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-6 text-center text-slate-400 italic">
+                  <td colSpan={6} className="p-6 text-center text-slate-400 italic">
                     No suppliers found. Click "+ Register New Supplier" above to add one.
                   </td>
                 </tr>
@@ -121,6 +132,15 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
                     <td className="p-2.5 text-slate-600">{s.place || '—'}</td>
                     <td className="p-2.5 font-semibold text-slate-700">{s.state || 'Tamil Nadu'}</td>
                     <td className="p-2.5 font-mono text-slate-700 font-semibold">{s.gstin || 'Unregistered'}</td>
+                    <td className="p-2.5 text-center">
+                      <button
+                        onClick={() => handleDeleteSupplier(s)}
+                        className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg border border-rose-200 transition-colors cursor-pointer"
+                        title="Delete Supplier"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}

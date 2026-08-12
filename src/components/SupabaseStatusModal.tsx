@@ -6,58 +6,50 @@ import {
   getSupabaseCredentials, 
   saveSupabaseCredentials 
 } from '../lib/supabase';
-import { forceSyncAllDataToCloud } from '../lib/storage';
-import { Database, CheckCircle2, AlertCircle, RefreshCw, Server, Key, Save, Link2, Copy, FileText, UploadCloud } from 'lucide-react';
+import { forceSyncAllDataToCloud, cleanDatabaseDuplicatesInSupabase } from '../lib/storage';
+import { Database, CheckCircle2, AlertCircle, RefreshCw, Server, Key, Save, Link2, Copy, FileText, UploadCloud, Trash2 } from 'lucide-react';
 
 interface SupabaseStatusModalProps {
   onClose: () => void;
   onRefreshData?: () => Promise<void>;
 }
 
-const SQL_FIX_SCRIPT = `-- Supabase SQL Permissions & Schema Fix Script
+const SQL_FIX_SCRIPT = `-- Supabase SQL Permissions & Deduplication Script
 -- Copy & paste into Supabase Dashboard -> SQL Editor -> Click RUN
 
--- Option A: Keep RLS ENABLED and allow app access via policies (Recommended for Security)
+-- 1. Grant Permissions / RLS Policies
 CREATE POLICY "Allow public read-write on app_state" ON public.app_state FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read-write on customers" ON public.customers FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read-write on sales_bills" ON public.sales_bills FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read-write on suppliers" ON public.suppliers FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read-write on inventory" ON public.inventory FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write on companies" ON public.companies FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write on company_settings" ON public.company_settings FOR ALL USING (true) WITH CHECK (true);
 
--- Option B: Or Disable RLS completely if policies are not needed
+-- Or Disable RLS if preferred
 ALTER TABLE IF EXISTS public.app_state DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.companies DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.company_settings DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.customers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.sales_bills DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.suppliers DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.inventory DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.variety_catalog DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.sales_bills DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.purchase_bills DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.customer_payments DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.production_orders DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.quality_audits DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.routine_reminders DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.employees DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.production_logs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.salary_advances DISABLE ROW LEVEL SECURITY;
 
-GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
-GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
-GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+-- 2. DEDUPLICATE CUSTOMERS (Keeps 1 copy per customer name)
+DELETE FROM public.customers a
+USING public.customers b
+WHERE a.ctid < b.ctid
+  AND a.company_id = b.company_id
+  AND LOWER(TRIM(a.name)) = LOWER(TRIM(b.name));
 
--- Schema Column Compatibility Fixes
+-- 3. DEDUPLICATE SALES BILLS (Keeps 1 copy per bill_no)
+DELETE FROM public.sales_bills a
+USING public.sales_bills b
+WHERE a.ctid < b.ctid
+  AND a.company_id = b.company_id
+  AND LOWER(TRIM(a.bill_no)) = LOWER(TRIM(b.bill_no));
+
+-- 4. Schema Column Fixes
 ALTER TABLE IF EXISTS public.customers ADD COLUMN IF NOT EXISTS address TEXT;
 ALTER TABLE IF EXISTS public.customers ADD COLUMN IF NOT EXISTS place TEXT;
-
-ALTER TABLE IF EXISTS public.company_settings ADD COLUMN IF NOT EXISTS address TEXT;
-
 ALTER TABLE IF EXISTS public.sales_bills ADD COLUMN IF NOT EXISTS customer_address TEXT;
 ALTER TABLE IF EXISTS public.sales_bills ADD COLUMN IF NOT EXISTS customer_phone TEXT;
-ALTER TABLE IF EXISTS public.sales_bills ADD COLUMN IF NOT EXISTS customer_gstin TEXT;
-ALTER TABLE IF EXISTS public.sales_bills ADD COLUMN IF NOT EXISTS grand_total NUMERIC;
 `;
 
 export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClose, onRefreshData }) => {
@@ -79,6 +71,8 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
     setLoading(false);
   };
 
+  const [cleaningDuplicates, setCleaningDuplicates] = useState(false);
+
   const handleForceSyncLocalData = async () => {
     setSyncingLocal(true);
     setSyncMsg('Merging & Uploading Local Storage Data to Supabase...');
@@ -97,6 +91,23 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
     } finally {
       setSyncingLocal(false);
       setTimeout(() => setSyncMsg(null), 4000);
+    }
+  };
+
+  const handleCleanDuplicates = async () => {
+    setCleaningDuplicates(true);
+    setSyncMsg('Cleaning duplicate customer & bill records in Supabase...');
+    try {
+      const res = await cleanDatabaseDuplicatesInSupabase();
+      setSyncMsg(`✅ ${res.message}`);
+      if (onRefreshData) {
+        await onRefreshData();
+      }
+    } catch (e: any) {
+      setSyncMsg(`Cleanup note: ${e?.message || 'Done'}`);
+    } finally {
+      setCleaningDuplicates(false);
+      setTimeout(() => setSyncMsg(null), 5000);
     }
   };
 
@@ -249,7 +260,7 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
           </div>
 
           {/* Manual Local Storage Upload & Cloud Sync Section */}
-          <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50/60 space-y-2">
+          <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50/60 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h4 className="font-mono text-emerald-950 font-bold text-xs flex items-center gap-1.5">
@@ -260,15 +271,26 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
                   If this computer has offline local storage data, click below to merge and upload all local bills, stock, and records into Supabase Cloud!
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={handleForceSyncLocalData}
-                disabled={syncingLocal || !status?.connected}
-                className="bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-mono font-bold text-xs px-3.5 py-2 rounded flex items-center justify-center gap-2 cursor-pointer shadow-xs whitespace-nowrap transition-colors"
-              >
-                <UploadCloud className={`w-4 h-4 ${syncingLocal ? 'animate-bounce' : ''}`} />
-                <span>{syncingLocal ? 'Syncing...' : 'Upload & Sync Local Data Now'}</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleForceSyncLocalData}
+                  disabled={syncingLocal || !status?.connected}
+                  className="bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-mono font-bold text-xs px-3.5 py-2 rounded flex items-center justify-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap transition-colors"
+                >
+                  <UploadCloud className={`w-4 h-4 ${syncingLocal ? 'animate-bounce' : ''}`} />
+                  <span>{syncingLocal ? 'Syncing...' : 'Upload & Sync Local Data'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCleanDuplicates}
+                  disabled={cleaningDuplicates || !status?.connected}
+                  className="bg-rose-700 hover:bg-rose-800 disabled:opacity-50 text-white font-mono font-bold text-xs px-3.5 py-2 rounded flex items-center justify-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap transition-colors"
+                >
+                  <Trash2 className={`w-4 h-4 ${cleaningDuplicates ? 'animate-spin' : ''}`} />
+                  <span>{cleaningDuplicates ? 'Purging Duplicates...' : 'Purge Duplicates in Supabase'}</span>
+                </button>
+              </div>
             </div>
             {syncMsg && (
               <div className="p-2 bg-white rounded border border-emerald-300 font-mono text-xs font-bold text-emerald-900 animate-fade-in">

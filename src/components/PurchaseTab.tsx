@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { PurchaseBill, Supplier, BillItem, InventoryItem } from '../types';
-import { storeSet } from '../lib/storage';
+import { storeSet, deleteFromRelationalTable } from '../lib/storage';
 import {
   Plus,
   Trash2,
@@ -206,6 +206,16 @@ export const PurchaseTab: React.FC<PurchaseTabProps> = ({
     setSupplierPlace('');
     setItems([{ name: '2/20s Cotton Yarn Warp', hsn: '5205', qty: 100, unit: 'kg', rate: 260, taxRate: 5, discPct: 0 }]);
     setPbPoNo(`PO-${String(updatedBills.length + 1).padStart(4, '0')}`);
+  };
+
+  const handleDeletePurchaseBill = async (bill: PurchaseBill) => {
+    if (!window.confirm(`Are you sure you want to delete purchase bill ${bill.poNo}?`)) return;
+
+    const updated = purchaseBills.filter((b) => b.id !== bill.id && b.poNo.toLowerCase().trim() !== bill.poNo.toLowerCase().trim());
+    setPurchaseBills(updated);
+    await storeSet('purchaseBills', updated);
+    await deleteFromRelationalTable('purchase_bills', bill.id, 'po_no', bill.poNo);
+    showToast(`Purchase bill ${bill.poNo} deleted!`);
   };
 
   return (
@@ -606,13 +616,23 @@ export const PurchaseTab: React.FC<PurchaseTabProps> = ({
                       <span className={`pill ${b.status}`}>{b.status}</span>
                     </td>
                     <td className="p-2.5 text-center">
-                      <button
-                        onClick={() => openInvoice(b.poNo, 'purchase')}
-                        className="px-2.5 py-1 rounded bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold border border-purple-200 flex items-center justify-center gap-1 mx-auto transition-colors cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>Print / Preview</span>
-                      </button>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => openInvoice(b.poNo, 'purchase')}
+                          className="px-2.5 py-1 rounded bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold border border-purple-200 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Print / Preview</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleDeletePurchaseBill(b)}
+                          className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded border border-rose-200 transition-colors cursor-pointer"
+                          title="Delete Purchase Bill"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
