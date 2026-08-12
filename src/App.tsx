@@ -106,7 +106,7 @@ export default function App() {
   const [companyId, setCompanyIdState] = useState<string>(getActiveCompanyId());
   const [companies, setCompanies] = useState<SubsidiaryCompany[]>(DEFAULT_SUBSIDIARY_COMPANIES);
   const [settings, setSettings] = useState<CompanySettings>(DEFAULT_COMPANY_SETTINGS);
-  const [sbCompanyId, setSbCompanyId] = useState<string>('comp-vca');
+  const [sbCompanyId, setSbCompanyId] = useState<string>(() => getActiveCompanyId());
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [editCompanyData, setEditCompanyData] = useState<SubsidiaryCompany | null>(null);
 
@@ -259,6 +259,10 @@ export default function App() {
 
   const handleSelectBillingCompany = (cId: string) => {
     setSbCompanyId(cId);
+    if (cId !== companyId) {
+      setActiveCompanyId(cId);
+      setCompanyIdState(cId);
+    }
     const targetComp = companies.find((c) => c.id === cId);
     if (targetComp) {
       const nextNo = generateNextBillNoForCompany(targetComp.id, targetComp.prefix, salesBills);
@@ -339,18 +343,19 @@ export default function App() {
 
       const activeId = getActiveCompanyId();
       setCompanyIdState(activeId);
+      setSbCompanyId(activeId);
 
       if (!silent) {
         if (!supCheck.connected) {
-          showToast(`⚠️ Refreshed from local storage (${supCheck.message || 'Offline mode'})`);
+          showToast(`⚠️ Refresh done (Local mode: ${supCheck.message || 'Offline'})`);
         } else if (syncRes.error) {
-          showToast(`⚠️ Refreshed! Sync note: ${syncRes.error}`);
+          showToast(`⚠️ Refresh done! Sync note: ${syncRes.error}`);
         } else {
-          showToast(`✅ Data Synced & Updated from Supabase Cloud!`);
+          showToast(`✅ Refresh done - Data Synced & Updated!`);
         }
       }
     } catch (err: any) {
-      if (!silent) showToast(`Sync result: ${err?.message || 'Data refresh completed'}`);
+      if (!silent) showToast(`Refresh done: ${err?.message || 'Data updated'}`);
     } finally {
       if (!silent) setIsRefreshing(false);
     }
@@ -383,10 +388,10 @@ export default function App() {
       const sBills = await storeGet<SalesBill[]>('salesBills', []);
       setSalesBills(sBills);
 
-      const defComp = comps.find((c) => c.isDefault) || comps[0] || DEFAULT_SUBSIDIARY_COMPANIES[0];
-      if (defComp) {
-        setSbCompanyId(defComp.id);
-        const initialBillNo = generateNextBillNoForCompany(defComp.id, defComp.prefix, sBills);
+      const activeComp = comps.find((c) => c.id === activeId) || comps.find((c) => c.isDefault) || comps[0] || DEFAULT_SUBSIDIARY_COMPANIES[0];
+      if (activeComp) {
+        setSbCompanyId(activeComp.id);
+        const initialBillNo = generateNextBillNoForCompany(activeComp.id, activeComp.prefix, sBills);
         setSbBillNo(initialBillNo);
       } else {
         setSbBillNo(`VC-${String(sBills.length + 1).padStart(3, '0')}`);
@@ -572,7 +577,12 @@ export default function App() {
     const newId = e.target.value;
     setActiveCompanyId(newId);
     setCompanyIdState(newId);
-    window.location.reload();
+    setSbCompanyId(newId);
+    const targetComp = companies.find((c) => c.id === newId);
+    if (targetComp) {
+      const nextNo = generateNextBillNoForCompany(targetComp.id, targetComp.prefix, salesBills);
+      setSbBillNo(nextNo);
+    }
   };
 
   // GST Split Calculator
