@@ -31,9 +31,10 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
     }
 
     const newSup: Supplier = {
-      ...form,
-      name: form.name.trim()
-    };
+          ...form,
+          id: `supp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          name: form.name.trim()
+        };
 
     const updated = [newSup, ...suppliers];
     setSuppliers(updated);
