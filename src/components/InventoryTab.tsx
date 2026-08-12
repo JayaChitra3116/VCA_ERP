@@ -95,7 +95,6 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
       if (stockForm.reorderLevel > 0) match.reorderLevel = stockForm.reorderLevel;
     } else {
       updated.push({
-        id: `inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         name: stockForm.itemName.trim(),
         type: stockForm.type,
         unit: stockForm.unit || (stockForm.type === 'raw' ? 'kg' : 'pcs'),

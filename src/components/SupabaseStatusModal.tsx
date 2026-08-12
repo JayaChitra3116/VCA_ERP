@@ -6,10 +6,12 @@ import {
   getSupabaseCredentials, 
   saveSupabaseCredentials 
 } from '../lib/supabase';
-import { Database, CheckCircle2, AlertCircle, RefreshCw, Server, Key, Link2, Save, Copy, FileText } from 'lucide-react';
+import { forceSyncAllDataToCloud } from '../lib/storage';
+import { Database, CheckCircle2, AlertCircle, RefreshCw, Server, Key, Save, Link2, Copy, FileText, UploadCloud } from 'lucide-react';
 
 interface SupabaseStatusModalProps {
   onClose: () => void;
+  onRefreshData?: () => Promise<void>;
 }
 
 const SQL_FIX_SCRIPT = `-- Supabase SQL Permissions & Schema Fix Script
@@ -37,11 +39,13 @@ ALTER TABLE IF EXISTS public.production_logs DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.salary_advances DISABLE ROW LEVEL SECURITY;
 `;
 
-export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClose }) => {
+export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClose, onRefreshData }) => {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<SupabaseHealthStatus | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [syncingLocal, setSyncingLocal] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   const initialCreds = getSupabaseCredentials();
   const [urlInput, setUrlInput] = useState(initialCreds.url || 'https://lfmjmhcqrpsjtnubaxym.supabase.co');
@@ -52,6 +56,27 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
     const result = await checkSupabaseConnection();
     setStatus(result);
     setLoading(false);
+  };
+
+  const handleForceSyncLocalData = async () => {
+    setSyncingLocal(true);
+    setSyncMsg('Merging & Uploading Local Storage Data to Supabase...');
+    try {
+      const res = await forceSyncAllDataToCloud();
+      if (res.error) {
+        setSyncMsg(`⚠️ Sync Note: ${res.error}`);
+      } else {
+        setSyncMsg(`✅ Successfully synced local & cloud records! (${res.syncedKeys} items merged)`);
+      }
+      if (onRefreshData) {
+        await onRefreshData();
+      }
+    } catch (e: any) {
+      setSyncMsg(`Sync error: ${e?.message || 'Failed'}`);
+    } finally {
+      setSyncingLocal(false);
+      setTimeout(() => setSyncMsg(null), 4000);
+    }
   };
 
   const handleCopySql = () => {
@@ -200,6 +225,35 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
                 )}
               </div>
             ) : null}
+          </div>
+
+          {/* Manual Local Storage Upload & Cloud Sync Section */}
+          <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50/60 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h4 className="font-mono text-emerald-950 font-bold text-xs flex items-center gap-1.5">
+                  <UploadCloud className="w-4 h-4 text-emerald-700" />
+                  <span>Sync Local Data (Computer A / Computer B)</span>
+                </h4>
+                <p className="text-[11px] text-emerald-800 font-sans mt-0.5">
+                  If this computer has offline local storage data, click below to merge and upload all local bills, stock, and records into Supabase Cloud!
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleForceSyncLocalData}
+                disabled={syncingLocal || !status?.connected}
+                className="bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-mono font-bold text-xs px-3.5 py-2 rounded flex items-center justify-center gap-2 cursor-pointer shadow-xs whitespace-nowrap transition-colors"
+              >
+                <UploadCloud className={`w-4 h-4 ${syncingLocal ? 'animate-bounce' : ''}`} />
+                <span>{syncingLocal ? 'Syncing...' : 'Upload & Sync Local Data Now'}</span>
+              </button>
+            </div>
+            {syncMsg && (
+              <div className="p-2 bg-white rounded border border-emerald-300 font-mono text-xs font-bold text-emerald-900 animate-fade-in">
+                {syncMsg}
+              </div>
+            )}
           </div>
 
           {/* Table Alignment Checklist */}

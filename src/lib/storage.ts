@@ -59,9 +59,53 @@ function scopedKey(key: string): string {
   return STORE_PREFIX + getActiveCompanyId() + ':' + key;
 }
 
+export function mergePayloads<T>(key: string, localVal: T, cloudVal: T): T {
+  if (!localVal) return cloudVal;
+  if (!cloudVal) return localVal;
+
+  if (Array.isArray(localVal) && Array.isArray(cloudVal)) {
+    const combinedMap = new Map<string, any>();
+
+    for (const item of cloudVal) {
+      if (item && typeof item === 'object') {
+        const idKey = item.id || (key === 'salesBills' ? item.billNo : null) || (key === 'purchaseBills' ? item.billNo : null);
+        if (idKey) {
+          combinedMap.set(String(idKey), item);
+        } else {
+          combinedMap.set(JSON.stringify(item), item);
+        }
+      } else {
+        combinedMap.set(String(item), item);
+      }
+    }
+
+    for (const item of localVal) {
+      if (item && typeof item === 'object') {
+        const idKey = item.id || (key === 'salesBills' ? item.billNo : null) || (key === 'purchaseBills' ? item.billNo : null);
+        if (idKey) {
+          const existing = combinedMap.get(String(idKey));
+          combinedMap.set(String(idKey), existing ? { ...existing, ...item } : item);
+        } else {
+          combinedMap.set(JSON.stringify(item), item);
+        }
+      } else {
+        combinedMap.set(String(item), item);
+      }
+    }
+
+    return Array.from(combinedMap.values()) as unknown as T;
+  }
+
+  if (typeof localVal === 'object' && typeof cloudVal === 'object') {
+    return { ...cloudVal, ...localVal };
+  }
+
+  return localVal || cloudVal;
+}
+
 export async function storeGet<T>(key: string, fallback: T): Promise<T> {
   let hasLocalData = false;
-  let localVal = fallback;
+  let localVal: T = fallback;
   try {
     const value = localStorage.getItem(scopedKey(key));
     if (value) {
@@ -82,10 +126,24 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
         .maybeSingle();
 
       if (!error && data && data.payload !== null && data.payload !== undefined) {
+        const cloudVal = data.payload as T;
+        const merged = hasLocalData ? mergePayloads(key, localVal, cloudVal) : cloudVal;
         try {
-          localStorage.setItem(scopedKey(key), JSON.stringify(data.payload));
+          localStorage.setItem(scopedKey(key), JSON.stringify(merged));
         } catch {}
-        return data.payload as T;
+        return merged;
+      }
+
+      // Upload local storage data to Cloud if Cloud doesn't have it yet
+      if (hasLocalData && localVal !== null && localVal !== undefined) {
+        try {
+          await client.from('app_state').upsert({
+            company_id: companyId,
+            store_key: key,
+            payload: localVal,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'company_id,store_key' });
+        } catch (e) {}
       }
 
       // Relational Fallbacks for all entity keys if app_state row was empty or not populated yet
@@ -132,11 +190,17 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
         if (pRows && pRows.length > 0) {
           const mapped: PurchaseBill[] = pRows.map((b: any) => ({
             id: b.id,
-            billNo: b.bill_no,
-            date: b.date,
-            supplierName: b.supplier_name,
-            grandTotal: Number(b.grand_total) || 0,
-            status: b.status,
+            poNo: b.po_no || b.bill_no || 'PO-000',
+            supplierInvNo: b.supplier_inv_no || 'INV-000',
+            date: b.date || new Date().toISOString().split('T')[0],
+            supplierName: b.supplier_name || 'Supplier',
+            supplierState: b.supplier_state || 'Tamil Nadu',
+            subtotal: Number(b.subtotal) || 0,
+            cgst: Number(b.cgst) || 0,
+            sgst: Number(b.sgst) || 0,
+            igst: Number(b.igst) || 0,
+            grand: Number(b.grand) || Number(b.grand_total) || 0,
+            status: b.status === 'unpaid' ? 'unpaid' : 'paid',
             items: b.items || []
           }));
           try { localStorage.setItem(scopedKey(key), JSON.stringify(mapped)); } catch {}
@@ -149,6 +213,7 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
             id: c.id,
             name: c.name,
             phone: c.phone || '',
+            place: c.place || c.address || '',
             gstin: c.gstin || '',
             address: c.address || '',
             state: c.state || 'Tamil Nadu',
@@ -165,8 +230,10 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
             id: s.id,
             name: s.name,
             phone: s.phone || '',
+            place: s.place || s.address || '',
             gstin: s.gstin || '',
             address: s.address || '',
+            state: s.state || 'Tamil Nadu',
             balance: Number(s.balance) || 0
           }));
           try { localStorage.setItem(scopedKey(key), JSON.stringify(mapped)); } catch {}
@@ -193,8 +260,7 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
             customerName: p.customer_name,
             date: p.date,
             amount: Number(p.amount) || 0,
-            paymentMode: p.payment_mode,
-            refNo: p.ref_no
+            note: p.note || p.ref_no || ''
           }));
           try { localStorage.setItem(scopedKey(key), JSON.stringify(mapped)); } catch {}
           return mapped as unknown as T;
@@ -316,7 +382,7 @@ export async function storeSet<T>(key: string, val: T): Promise<void> {
         if (key === 'salesBills' && Array.isArray(val) && val.length > 0) {
           const rows = val.map((b: any) => ({
             id: ensureUuid(b.id || `sb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`),
-            company_id: companyId,
+            company_id: ensureUuid(companyId),
             bill_no: b.billNo || 'VC-000',
             date: b.date || new Date().toISOString().split('T')[0],
             customer_name: b.customerName || 'Customer',
@@ -528,27 +594,6 @@ export async function globalSet<T>(key: string, val: T): Promise<void> {
         payload: val,
         updated_at: new Date().toISOString()
       }, { onConflict: 'company_id,store_key' });
-
-      // Also mirror the Subsidiary Companies list into the real `companies` table
-      if (key === 'companies' && Array.isArray(val) && val.length > 0) {
-        const rows = (val as any[]).map((c: any) => ({
-          id: c.id,
-          name: c.name,
-          prefix: c.prefix || null,
-          address: c.address || null,
-          gstin: c.gstin || null,
-          phone: c.phone || null,
-          state: c.state || null,
-          bank_name: c.bankName || null,
-          bank_account: c.bankAccount || null,
-          bank_ifsc: c.bankIfsc || null,
-          is_default: !!c.isDefault
-        }));
-        const { error: compErr } = await client.from('companies').upsert(rows, { onConflict: 'id' });
-        if (compErr) {
-          console.warn('companies table mirror sync notice:', compErr.message);
-        }
-      }
     } catch (e) {}
   }
 }
@@ -583,14 +628,36 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
   for (const key of keysToSync) {
     try {
       const localRaw = localStorage.getItem(scopedKey(key));
-      // CRITICAL FIX: Only sync if local data actually exists in local storage!
-      // Do NOT construct fallback defaults here, otherwise fresh browser sessions
-      // will overwrite existing Cloud data with empty/default data.
-      if (!localRaw) {
+      let localVal = localRaw ? JSON.parse(localRaw) : null;
+
+      // Fetch existing Cloud row to perform smart merge
+      const { data: cloudRow } = await client
+        .from('app_state')
+        .select('payload')
+        .eq('company_id', companyId)
+        .eq('store_key', key)
+        .maybeSingle();
+
+      let valToSave = localVal;
+
+      if (cloudRow && cloudRow.payload !== null && cloudRow.payload !== undefined) {
+        if (localVal) {
+          valToSave = mergePayloads(key, localVal, cloudRow.payload);
+        } else {
+          valToSave = cloudRow.payload;
+        }
+      }
+
+      if (!valToSave) {
         continue;
       }
 
-      const val = JSON.parse(localRaw);
+      // Write merged val back to localStorage
+      try {
+        localStorage.setItem(scopedKey(key), JSON.stringify(valToSave));
+      } catch (e) {}
+
+      const val = valToSave;
 
       // 1. Sync to app_state
       const { error: appStateErr } = await client.from('app_state').upsert({
@@ -671,26 +738,26 @@ export async function forceSyncAllDataToCloud(): Promise<{ syncedKeys: number; e
         }));
         await client.from('employees').upsert(rows, { onConflict: 'id' });
       } else if (key === 'purchaseBills' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((b: PurchaseBill) => ({
+        const rows = val.map((b: any) => ({
           id: b.id || `pb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           company_id: companyId,
-          bill_no: b.billNo || 'PB-000',
+          bill_no: b.poNo || b.billNo || 'PB-000',
           date: b.date || new Date().toISOString().split('T')[0],
           supplier_name: b.supplierName || 'Supplier',
-          grand_total: b.grandTotal || 0,
+          grand_total: b.grand || b.grandTotal || 0,
           status: b.status || 'paid',
           items: b.items || []
         }));
         await client.from('purchase_bills').upsert(rows, { onConflict: 'id' });
       } else if (key === 'payments' && Array.isArray(val) && val.length > 0) {
-        const rows = val.map((p: CustomerPayment) => ({
+        const rows = val.map((p: any) => ({
           id: p.id || `pay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           company_id: companyId,
           customer_name: p.customerName || 'Customer',
           date: p.date || new Date().toISOString().split('T')[0],
           amount: p.amount || 0,
-          payment_mode: p.paymentMode || 'cash',
-          ref_no: p.refNo || null
+          payment_mode: 'cash',
+          ref_no: p.note || null
         }));
         await client.from('customer_payments').upsert(rows, { onConflict: 'id' });
       } else if (key === 'productionOrders' && Array.isArray(val) && val.length > 0) {

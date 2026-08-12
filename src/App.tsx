@@ -272,12 +272,19 @@ export default function App() {
   const handleRefreshData = async (silent: boolean = false) => {
     if (!silent) {
       setIsRefreshing(true);
-      showToast('🔄 Syncing latest data with Supabase Cloud...');
+      showToast('🔄 Syncing & merging local data with Supabase Cloud...');
     }
     try {
       const supCheck = await checkSupabaseConnection();
       setSupabaseStatus(supCheck);
 
+      // 1. FIRST: Sync local modifications to Cloud (with bidirectional merge)
+      let syncRes: { syncedKeys: number; error?: string } = { syncedKeys: 0 };
+      if (supCheck.connected) {
+        syncRes = await forceSyncAllDataToCloud();
+      }
+
+      // 2. THEN: Load merged dataset into React state
       const comps = await globalGet<SubsidiaryCompany[]>('companies', DEFAULT_SUBSIDIARY_COMPANIES);
       setCompanies(comps);
 
@@ -319,22 +326,17 @@ export default function App() {
       const loadedRems = await storeGet<RoutineTaskReminder[]>('routineReminders', DEFAULT_ROUTINE_REMINDERS);
       setRoutineReminders(loadedRems);
 
-      // Upload local modifications if any
-      const syncRes = await forceSyncAllDataToCloud();
-
       if (!silent) {
         if (!supCheck.connected) {
           showToast(`⚠️ Supabase disconnected: ${supCheck.message}`);
         } else if (syncRes.error) {
-          showToast(`⚠️ Refreshed, but sync warning: ${syncRes.error}`);
-        } else if (syncRes.syncedKeys > 0) {
-          showToast(`✅ Synced & Updated ${syncRes.syncedKeys} tables with Supabase Cloud!`);
+          showToast(`⚠️ Refreshed, sync note: ${syncRes.error}`);
         } else {
-          showToast('✅ All data synced with Supabase Cloud!');
+          showToast(`✅ Synced & Merged ${syncRes.syncedKeys} entities with Supabase Cloud!`);
         }
       }
     } catch (err: any) {
-      if (!silent) showToast(`Sync warning: ${err?.message || 'Data refresh completed'}`);
+      if (!silent) showToast(`Sync result: ${err?.message || 'Data refresh completed'}`);
     } finally {
       if (!silent) setIsRefreshing(false);
     }
@@ -611,20 +613,13 @@ export default function App() {
   };
 
   // Inventory Change Helper
-const changeStockByName = async (name: string, type: 'raw' | 'finished', delta: number, unit = 'pcs') => {
+  const changeStockByName = async (name: string, type: 'raw' | 'finished', delta: number, unit = 'pcs') => {
     const updated = [...inventory];
     const match = updated.find((i) => i.name.toLowerCase() === name.toLowerCase());
     if (match) {
       match.qty = (match.qty || 0) + delta;
     } else {
-      updated.push({
-        id: `inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        name,
-        type,
-        unit,
-        qty: Math.max(delta, 0),
-        reorderLevel: 0
-      });
+      updated.push({ name, type, unit, qty: Math.max(delta, 0), reorderLevel: 0 });
     }
     setInventory(updated);
     await storeSet('inventory', updated);
@@ -1840,12 +1835,10 @@ const changeStockByName = async (name: string, type: 'raw' | 'finished', delta: 
                     }
 
                     // Auto add customer if new
-
                     if (!customers.some((c) => c.name.toLowerCase() === sbCustomer.toLowerCase().trim())) {
                       const updatedCusts = [
                         ...customers,
                         {
-                          id: `cust_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
                           name: sbCustomer.trim(),
                           phone: sbCustPhone,
                           place: sbCustAddress,
@@ -3285,7 +3278,10 @@ const changeStockByName = async (name: string, type: 'raw' | 'finished', delta: 
 
       {/* SUPABASE STATUS DIAGNOSTIC MODAL */}
       {showSupabaseModal && (
-        <SupabaseStatusModal onClose={() => setShowSupabaseModal(false)} />
+        <SupabaseStatusModal 
+          onClose={() => setShowSupabaseModal(false)} 
+          onRefreshData={() => handleRefreshData(false)}
+        />
       )}
 
       {/* SECURITY & PWA INSTALLATION MODAL */}
