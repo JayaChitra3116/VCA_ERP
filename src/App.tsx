@@ -38,7 +38,7 @@ import {
 } from './lib/storage';
 import { VCA_LOGO_DATA_URL } from './assets/vcaLogoData';
 
-import { checkSupabaseConnection, isSupabaseConfigured, SupabaseHealthStatus } from './lib/supabase';
+import { checkSupabaseConnection, quickCheckSupabaseConnection, isSupabaseConfigured, SupabaseHealthStatus } from './lib/supabase';
 import { OrdersTab } from './components/OrdersTab';
 import { VarietyAndQualityTab } from './components/VarietyAndQualityTab';
 import { SupabaseStatusModal } from './components/SupabaseStatusModal';
@@ -273,15 +273,17 @@ export default function App() {
   // Manual Refresh & Cloud Sync State
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const handleRefreshData = async (silent: boolean = false) => {
-    if (isRefreshing && !silent) return;
+  const handleRefreshData = async (options?: boolean | React.SyntheticEvent) => {
+    const isSilent = typeof options === 'boolean' ? options : false;
     
-    if (!silent) {
+    if (isRefreshing && !isSilent) return;
+    
+    if (!isSilent) {
       setIsRefreshing(true);
       showToast('🔄 Syncing & merging data with Supabase Cloud...');
     }
     try {
-      const supCheck = await checkSupabaseConnection();
+      const supCheck = await quickCheckSupabaseConnection();
       setSupabaseStatus(supCheck);
 
       // 1. FIRST: Sync local modifications to Cloud (with parallel key processing)
@@ -290,24 +292,8 @@ export default function App() {
         syncRes = await forceSyncAllDataToCloud();
       }
 
-      // 2. THEN: Load merged dataset into React state in parallel
-      const [
-        comps,
-        setts,
-        custs,
-        supps,
-        inv,
-        sBills,
-        pBills,
-        pmts,
-        emps,
-        pLogs,
-        sAdvs,
-        pOrders,
-        vars,
-        qAudits,
-        rRems
-      ] = await Promise.all([
+      // 2. THEN: Load merged dataset into React state with an 8-second safety timeout
+      const loadPromise = Promise.all([
         globalGet<SubsidiaryCompany[]>('companies', DEFAULT_SUBSIDIARY_COMPANIES),
         storeGet<CompanySettings>('companySettings', DEFAULT_COMPANY_SETTINGS),
         storeGet<Customer[]>('customers', []),
@@ -324,6 +310,28 @@ export default function App() {
         storeGet<QualityCheckAudit[]>('qualityAudits', DEFAULT_QUALITY_AUDITS),
         storeGet<RoutineTaskReminder[]>('routineReminders', DEFAULT_ROUTINE_REMINDERS)
       ]);
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Data load timeout')), 8000)
+      );
+
+      const [
+        comps,
+        setts,
+        custs,
+        supps,
+        inv,
+        sBills,
+        pBills,
+        pmts,
+        emps,
+        pLogs,
+        sAdvs,
+        pOrders,
+        vars,
+        qAudits,
+        rRems
+      ] = await Promise.race([loadPromise, timeoutPromise]);
 
       setCompanies(comps);
       setSettings(setts);
@@ -345,9 +353,9 @@ export default function App() {
       setCompanyIdState(activeId);
       setSbCompanyId(activeId);
 
-      if (!silent) {
+      if (!isSilent) {
         if (!supCheck.connected) {
-          showToast(`⚠️ Refresh done (Local mode: ${supCheck.message || 'Offline'})`);
+          showToast(`⚠️ Refresh done (Local storage mode)`);
         } else if (syncRes.error) {
           showToast(`⚠️ Refresh done! Sync note: ${syncRes.error}`);
         } else {
@@ -355,9 +363,9 @@ export default function App() {
         }
       }
     } catch (err: any) {
-      if (!silent) showToast(`Refresh done: ${err?.message || 'Data updated'}`);
+      if (!isSilent) showToast(`Refresh done: ${err?.message || 'Data updated'}`);
     } finally {
-      if (!silent) setIsRefreshing(false);
+      setIsRefreshing(false);
     }
   };
 
@@ -1064,7 +1072,7 @@ export default function App() {
           )}
 
           <button
-            onClick={handleRefreshData}
+            onClick={() => handleRefreshData(false)}
             disabled={isRefreshing}
             className="bg-emerald-800 hover:bg-emerald-700 text-emerald-100 text-xs px-2.5 py-1 rounded-md border border-emerald-600 flex items-center gap-1.5 cursor-pointer font-mono font-bold transition-colors disabled:opacity-50"
             title="Refresh & Sync Data from Cloud"
@@ -1100,7 +1108,7 @@ export default function App() {
 
         <div className="flex items-center gap-1.5">
           <button
-            onClick={handleRefreshData}
+            onClick={() => handleRefreshData(false)}
             disabled={isRefreshing}
             className="p-1.5 rounded bg-[#FAF8F3] text-[#8B5E1E] border border-[#D0C8B8] flex items-center justify-center cursor-pointer"
             title="Refresh Data"

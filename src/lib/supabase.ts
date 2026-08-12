@@ -102,6 +102,55 @@ export const EXPECTED_TABLES = [
   'salary_advances'
 ];
 
+export async function quickCheckSupabaseConnection(): Promise<SupabaseHealthStatus> {
+  const client = getSupabaseClient();
+  const { url } = getSupabaseCredentials();
+  const configured = getIsSupabaseConfigured();
+
+  if (!configured || !client) {
+    return {
+      configured: false,
+      connected: false,
+      missingTables: EXPECTED_TABLES,
+      message: 'Supabase Project URL or Anon Key is missing.'
+    };
+  }
+
+  try {
+    const probePromise = client.from('app_state').select('count', { count: 'exact', head: true });
+    const timeoutPromise = new Promise<{ error: any }>((_, reject) =>
+      setTimeout(() => reject(new Error('Connection probe timed out')), 2500)
+    );
+
+    const probeRes: any = await Promise.race([probePromise, timeoutPromise]).catch(err => ({ error: err }));
+    if (probeRes.error) {
+      return {
+        configured: true,
+        connected: false,
+        missingTables: [],
+        urlUsed: url,
+        message: probeRes.error.message || 'Offline'
+      };
+    }
+
+    return {
+      configured: true,
+      connected: true,
+      missingTables: [],
+      urlUsed: url,
+      message: `Connected to Supabase (${url})`
+    };
+  } catch (err: any) {
+    return {
+      configured: true,
+      connected: false,
+      missingTables: [],
+      urlUsed: url,
+      message: err?.message || 'Connection failed'
+    };
+  }
+}
+
 export async function checkSupabaseConnection(): Promise<SupabaseHealthStatus> {
   const client = getSupabaseClient();
   const { url } = getSupabaseCredentials();
