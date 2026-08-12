@@ -1840,10 +1840,12 @@ const changeStockByName = async (name: string, type: 'raw' | 'finished', delta: 
                     }
 
                     // Auto add customer if new
+
                     if (!customers.some((c) => c.name.toLowerCase() === sbCustomer.toLowerCase().trim())) {
                       const updatedCusts = [
                         ...customers,
                         {
+                          id: `cust_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
                           name: sbCustomer.trim(),
                           phone: sbCustPhone,
                           place: sbCustAddress,
