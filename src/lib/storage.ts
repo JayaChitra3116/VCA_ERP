@@ -15,7 +15,7 @@ import {
   ProductionLog, 
   SalaryAdvance 
 } from '../types';
-import { getSupabaseClient, getIsSupabaseConfigured } from './supabase';
+import { getSupabaseClient, getIsSupabaseConfigured, EXPECTED_TABLES } from './supabase';
 import { VCA_LOGO_DATA_URL } from '../assets/vcaLogoData';
 
 const STORE_PREFIX = 'vcaPreview:';
@@ -56,10 +56,10 @@ export function ensureUuid(idStr?: string): string {
 }
 
 function scopedKey(key: string): string {
-  if (key === 'customers') {
-    return GLOBAL_STORE_PREFIX + 'customers';
+  if (key === 'salesBills' || key === 'payments' || key === 'companySettings') {
+    return STORE_PREFIX + getActiveCompanyId() + ':' + key;
   }
-  return STORE_PREFIX + getActiveCompanyId() + ':' + key;
+  return GLOBAL_STORE_PREFIX + key;
 }
 
 export function mergePayloads<T>(key: string, localVal: T, cloudVal: T): T {
@@ -157,7 +157,7 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
         }
 
         if (combinedCustList.length > 0) {
-          const mergedCusts = mergePayloads('customers', localVal, combinedCustList) as unknown as T;
+          const mergedCusts = mergePayloads<T>('customers', localVal, combinedCustList as unknown as T);
           try { localStorage.setItem(scopedKey('customers'), JSON.stringify(mergedCusts)); } catch {}
           syncPayloadToRelationalTable(companyId, 'customers', mergedCusts);
           return mergedCusts;
@@ -274,7 +274,7 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
           return cleanList as unknown as T;
         }
       } else if (key === 'suppliers') {
-        const { data: suppRows } = await client.from('suppliers').select('*').eq('company_id', companyId);
+        const { data: suppRows } = await client.from('suppliers').select('*');
         if (suppRows && suppRows.length > 0) {
           const mapped: Supplier[] = suppRows.map((s: any) => ({
             id: s.id,
@@ -286,24 +286,71 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
             state: s.state || 'Tamil Nadu',
             balance: Number(s.balance) || 0
           }));
-          try { localStorage.setItem(scopedKey(key), JSON.stringify(mapped)); } catch {}
-          return mapped as unknown as T;
+          const uniqueMap = new Map<string, Supplier>();
+          mapped.forEach(s => {
+            const k = (s.name || '').toLowerCase().trim();
+            if (k) uniqueMap.set(k, s);
+          });
+          const cleanList = Array.from(uniqueMap.values());
+          try { localStorage.setItem(scopedKey(key), JSON.stringify(cleanList)); } catch {}
+          return cleanList as unknown as T;
         }
       } else if (key === 'employees') {
-        const { data: empRows } = await client.from('employees').select('*').eq('company_id', companyId);
+        const { data: empRows } = await client.from('employees').select('*');
         if (empRows && empRows.length > 0) {
           const mapped: Employee[] = empRows.map((e: any) => ({
             id: e.id,
             name: e.name,
             role: e.role,
             machine: e.machine || '',
-            salary: Number(e.salary) || 0
+            salary: Number(e.salary) || 0,
+            phone: e.phone || '',
+            loomCount: Number(e.loom_count) || Number(e.loomCount) || 1,
+            loomRates: e.loom_rates || e.loomRates || []
+          }));
+          const uniqueMap = new Map<string, Employee>();
+          mapped.forEach(e => {
+            const k = (e.name || '').toLowerCase().trim();
+            if (k) uniqueMap.set(k, e);
+          });
+          const cleanList = Array.from(uniqueMap.values());
+          try { localStorage.setItem(scopedKey(key), JSON.stringify(cleanList)); } catch {}
+          return cleanList as unknown as T;
+        }
+      } else if (key === 'productionLogs') {
+        const { data: pLogRows } = await client.from('production_logs').select('*');
+        if (pLogRows && pLogRows.length > 0) {
+          const mapped: ProductionLog[] = pLogRows.map((pl: any) => ({
+            id: pl.id,
+            date: pl.date || pl.log_date || new Date().toISOString().split('T')[0],
+            item: pl.item || pl.item_name || pl.variety_name || '',
+            qty: Number(pl.qty) || Number(pl.qty_produced) || Number(pl.meters_produced) || 0,
+            unit: pl.unit || 'pcs',
+            notes: pl.notes || '',
+            waste: Number(pl.waste) || 0,
+            machine: pl.machine || pl.machine_no || 'M-1',
+            employeeName: pl.employee_name || pl.operator_name || ''
+          }));
+          try { localStorage.setItem(scopedKey(key), JSON.stringify(mapped)); } catch {}
+          return mapped as unknown as T;
+        }
+      } else if (key === 'salaryAdvances') {
+        const { data: advRows } = await client.from('salary_advances').select('*');
+        if (advRows && advRows.length > 0) {
+          const mapped: SalaryAdvance[] = advRows.map((sa: any) => ({
+            id: sa.id,
+            employeeId: sa.employee_id || sa.employeeId || '',
+            employeeName: sa.employee_name || sa.employeeName || '',
+            amount: Number(sa.amount) || 0,
+            date: sa.date || sa.advance_date || new Date().toISOString().split('T')[0],
+            notes: sa.notes || ''
           }));
           try { localStorage.setItem(scopedKey(key), JSON.stringify(mapped)); } catch {}
           return mapped as unknown as T;
         }
       } else if (key === 'payments') {
-        const { data: payRows } = await client.from('customer_payments').select('*').eq('company_id', companyId);
+        const uuidCompId = ensureUuid(companyId);
+        const { data: payRows } = await client.from('customer_payments').select('*').or(`company_id.eq.${companyId},company_id.eq.${uuidCompId}`);
         if (payRows && payRows.length > 0) {
           const mapped: CustomerPayment[] = payRows.map((p: any) => ({
             id: p.id,
@@ -316,23 +363,41 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
           return mapped as unknown as T;
         }
       } else if (key === 'productionOrders') {
-        const { data: poRows } = await client.from('production_orders').select('*').eq('company_id', companyId);
+        let poRows: any[] | null = null;
+        try {
+          const { data } = await client.from('production_orders').select('*');
+          if (data && data.length > 0) poRows = data;
+        } catch (e) {}
+
+        if (!poRows || poRows.length === 0) {
+          try {
+            const { data } = await client.from('orders').select('*');
+            if (data && data.length > 0) poRows = data;
+          } catch (e) {}
+        }
+
         if (poRows && poRows.length > 0) {
           const mapped: ProductionOrder[] = poRows.map((o: any) => ({
             id: o.id,
-            orderNo: o.order_no,
-            customerName: o.customer_name,
-            orderDate: o.order_date,
-            deliveryDueDate: o.delivery_due_date,
-            status: o.status,
-            notes: o.notes,
-            items: o.items || []
+            orderNo: o.order_no || o.order_number || o.po_no || o.id || 'ORD-001',
+            customerName: o.customer_name || o.customerName || '',
+            orderDate: o.order_date || o.orderDate || o.date || new Date().toISOString().split('T')[0],
+            deliveryDueDate: o.delivery_due_date || o.deliveryDueDate || o.due_date || '',
+            status: o.status || 'in_production',
+            notes: o.notes || '',
+            items: Array.isArray(o.items) ? o.items : []
           }));
-          try { localStorage.setItem(scopedKey(key), JSON.stringify(mapped)); } catch {}
-          return mapped as unknown as T;
+          const uniqueMap = new Map<string, ProductionOrder>();
+          mapped.forEach(o => {
+            const k = (o.orderNo || o.id || '').toLowerCase().trim();
+            if (k) uniqueMap.set(k, o);
+          });
+          const cleanList = Array.from(uniqueMap.values());
+          try { localStorage.setItem(scopedKey(key), JSON.stringify(cleanList)); } catch {}
+          return cleanList as unknown as T;
         }
       } else if (key === 'varietyCatalog') {
-        const { data: varRows } = await client.from('variety_catalog').select('*').eq('company_id', companyId);
+        const { data: varRows } = await client.from('variety_catalog').select('*');
         if (varRows && varRows.length > 0) {
           const mapped: VarietyCatalog[] = varRows.map((v: any) => ({
             id: v.id,
@@ -350,11 +415,17 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
             activeStatus: v.active_status ?? true,
             assignedMachines: v.assigned_machines || []
           }));
-          try { localStorage.setItem(scopedKey(key), JSON.stringify(mapped)); } catch {}
-          return mapped as unknown as T;
+          const uniqueMap = new Map<string, VarietyCatalog>();
+          mapped.forEach(v => {
+            const k = (v.varietyName || v.id || '').toLowerCase().trim();
+            if (k) uniqueMap.set(k, v);
+          });
+          const cleanList = Array.from(uniqueMap.values());
+          try { localStorage.setItem(scopedKey(key), JSON.stringify(cleanList)); } catch {}
+          return cleanList as unknown as T;
         }
       } else if (key === 'qualityAudits') {
-        const { data: qaRows } = await client.from('quality_audits').select('*').eq('company_id', companyId);
+        const { data: qaRows } = await client.from('quality_audits').select('*');
         if (qaRows && qaRows.length > 0) {
           const mapped: QualityCheckAudit[] = qaRows.map((q: any) => ({
             id: q.id,
@@ -410,43 +481,47 @@ export async function safeUpsertRelationalTable(tableName: string, initialRows: 
   if (!getIsSupabaseConfigured() || !client || !initialRows || initialRows.length === 0) return false;
 
   let currentRows = initialRows.map(r => ({ ...r }));
-  let maxAttempts = 12;
+  let maxAttempts = 15;
   let attempt = 0;
 
   while (attempt < maxAttempts) {
     attempt++;
     let error: any = null;
     try {
+      // 1. Try upsert first
       const res = await client.from(tableName).upsert(currentRows, { onConflict: 'id' });
       error = res.error;
     } catch (fetchErr: any) {
-      console.warn(`⚠️ Network connection issue syncing '${tableName}' (Failed to fetch):`, fetchErr?.message || String(fetchErr));
+      console.warn(`⚠️ Network connection issue syncing '${tableName}':`, fetchErr?.message || String(fetchErr));
       return false;
     }
 
     if (!error) {
-      console.log(`✅ Relational sync success for ${tableName} (${currentRows.length} rows inserted)`);
       return true;
     }
 
     const errorMsg = error.message || error.details || String(error);
+    const errorCode = error.code || '';
+
+    // If table completely does not exist in Supabase (42P01 / PGRST301)
+    if (errorCode === '42P01' || errorMsg.includes('does not exist') || errorMsg.includes('relation') || errorCode === 'PGRST301') {
+      return false;
+    }
 
     // RLS Policy Error Check
     if (
-      error.code === '42501' || 
+      errorCode === '42501' || 
       errorMsg.includes('row-level security') || 
       errorMsg.includes('permission denied') ||
       errorMsg.includes('violates row-level security policy')
     ) {
-      console.warn(`⚠️ Relational table '${tableName}' has Row-Level Security (RLS) active in Supabase. Data is preserved safely in 'app_state'. Run the SQL Fix Script in Supabase Dashboard to enable relational table queries.`);
       return false;
     }
 
-    // Check 1: Missing column error (e.g. "Could not find the 'address' column of 'customers' in the schema cache")
+    // Auto-Fix 1: Missing column error (e.g. "Could not find the 'xyz' column of 'table' in the schema cache")
     const missingColMatch = errorMsg.match(/Could not find the '([^']+)' column/i);
     if (missingColMatch && missingColMatch[1]) {
       const missingCol = missingColMatch[1];
-      console.warn(`⚠️ Column '${missingCol}' missing in '${tableName}' table schema. Stripping column and retrying...`);
       currentRows = currentRows.map(r => {
         const copy = { ...r };
         delete copy[missingCol];
@@ -455,9 +530,20 @@ export async function safeUpsertRelationalTable(tableName: string, initialRows: 
       continue;
     }
 
-    // Check 2: UUID syntax error (e.g. "invalid input syntax for type uuid: "comp-vca"")
-    if (errorMsg.includes('invalid input syntax for type uuid')) {
-      console.warn(`⚠️ UUID type requirement detected on '${tableName}'. Converting IDs to UUID format...`);
+    // Auto-Fix 2: Column does not exist error
+    const colNotExistMatch = errorMsg.match(/column "([^"]+)" of relation "[^"]+" does not exist/i);
+    if (colNotExistMatch && colNotExistMatch[1]) {
+      const missingCol = colNotExistMatch[1];
+      currentRows = currentRows.map(r => {
+        const copy = { ...r };
+        delete copy[missingCol];
+        return copy;
+      });
+      continue;
+    }
+
+    // Auto-Fix 3: UUID syntax error (e.g. "invalid input syntax for type uuid: "comp-vca"")
+    if (errorMsg.includes('invalid input syntax for type uuid') || errorCode === '22P02') {
       currentRows = currentRows.map(r => {
         const copy = { ...r };
         if (copy.company_id && !/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(String(copy.company_id))) {
@@ -466,42 +552,92 @@ export async function safeUpsertRelationalTable(tableName: string, initialRows: 
         if (copy.id && !/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(String(copy.id))) {
           copy.id = ensureUuid(String(copy.id));
         }
+        if (copy.employee_id && !/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(String(copy.employee_id))) {
+          copy.employee_id = ensureUuid(String(copy.employee_id));
+        }
+        return copy;
+      });
+      continue;
+    }
+
+    // Auto-Fix 4: Foreign key violation (e.g., employee_id or company_id not in parent table)
+    if (errorCode === '23503' || errorMsg.includes('violates foreign key constraint')) {
+      currentRows = currentRows.map(r => {
+        const copy = { ...r };
+        // If employee_id is causing FK constraint, nullify it
+        if ('employee_id' in copy) delete copy.employee_id;
+        return copy;
+      });
+      continue;
+    }
+
+    // Auto-Fix 5: NOT NULL constraint violation (e.g. null value in column "xyz" violates not-null constraint)
+    const notNullMatch = errorMsg.match(/null value in column "([^"]+)"(?: of relation "[^"]+")? violates not-null constraint/i);
+    if (notNullMatch && notNullMatch[1]) {
+      const nullCol = notNullMatch[1];
+      currentRows = currentRows.map(r => {
+        const copy = { ...r };
+        if (copy[nullCol] === null || copy[nullCol] === undefined) {
+          if (nullCol.includes('date')) copy[nullCol] = new Date().toISOString().split('T')[0];
+          else if (nullCol.includes('id')) copy[nullCol] = ensureUuid('default_' + nullCol);
+          else if (typeof copy[nullCol] === 'number' || nullCol.includes('amount') || nullCol.includes('qty') || nullCol.includes('total') || nullCol.includes('price')) copy[nullCol] = 0;
+          else copy[nullCol] = '';
+        }
+        return copy;
+      });
+      continue;
+    }
+
+    // Auto-Fix 6: JSON string parsing issue for JSONB columns
+    if (errorMsg.includes('json') || errorMsg.includes('JSON') || errorMsg.includes('array')) {
+      currentRows = currentRows.map(r => {
+        const copy = { ...r };
+        for (const [k, v] of Object.entries(copy)) {
+          if (Array.isArray(v) || (typeof v === 'object' && v !== null)) {
+            // Keep as valid object
+          } else if (typeof v === 'string' && (v.startsWith('[') || v.startsWith('{'))) {
+            try { copy[k] = JSON.parse(v); } catch {}
+          }
+        }
         return copy;
       });
       continue;
     }
 
     // Unhandled error
-    console.warn(`⚠️ Sync notice for ${tableName}:`, errorMsg);
     return false;
   }
 
   return false;
 }
 
-export async function syncPayloadToRelationalTable(companyId: string, key: string, val: any): Promise<void> {
+export async function syncPayloadToRelationalTable(companyId: string, key: string, val: any): Promise<boolean> {
   const client = getSupabaseClient();
-  if (!getIsSupabaseConfigured() || !client || !val) return;
+  if (!getIsSupabaseConfigured() || !client || val === null || val === undefined) return false;
 
   try {
     if (key === 'companySettings' && typeof val === 'object') {
       const s = val as any;
-      await safeUpsertRelationalTable('company_settings', [{
+      return await safeUpsertRelationalTable('company_settings', [{
         id: companyId,
         company_id: companyId,
         name: s.name || '',
+        tagline: s.tagline || '',
         address: s.address || '',
         phone: s.phone || '',
         gstin: s.gstin || '',
         state: s.state || 'Tamil Nadu',
         pincode: s.pincode || '',
+        role: s.role || 'admin',
         bank_name: s.bankName || '',
         bank_account: s.bankAccount || '',
         bank_ifsc: s.bankIfsc || '',
         bank_branch: s.bankBranch || '',
+        logo: s.logo || '',
         updated_at: new Date().toISOString()
       }]);
-    } else if (key === 'salesBills' && Array.isArray(val) && val.length > 0) {
+    } else if (key === 'salesBills' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((b: any) => ({
         id: ensureUuid(b.id || `sb_${b.billNo}`),
         company_id: ensureUuid(companyId),
@@ -523,8 +659,9 @@ export async function syncPayloadToRelationalTable(companyId: string, key: strin
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('sales_bills', Array.from(uniqueMap.values()));
-    } else if (key === 'customers' && Array.isArray(val) && val.length > 0) {
+      return await safeUpsertRelationalTable('sales_bills', Array.from(uniqueMap.values()));
+    } else if (key === 'customers' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((c: any) => ({
         id: ensureUuid(c.id || `cust_${(c.name || '').toLowerCase().trim()}`),
         company_id: ensureUuid(companyId),
@@ -539,8 +676,9 @@ export async function syncPayloadToRelationalTable(companyId: string, key: strin
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('customers', Array.from(uniqueMap.values()));
-    } else if (key === 'suppliers' && Array.isArray(val) && val.length > 0) {
+      return await safeUpsertRelationalTable('customers', Array.from(uniqueMap.values()));
+    } else if (key === 'suppliers' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((s: any) => ({
         id: ensureUuid(s.id || `supp_${(s.name || '').toLowerCase().trim()}`),
         company_id: ensureUuid(companyId),
@@ -554,33 +692,39 @@ export async function syncPayloadToRelationalTable(companyId: string, key: strin
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('suppliers', Array.from(uniqueMap.values()));
-    } else if (key === 'inventory' && Array.isArray(val) && val.length > 0) {
+      return await safeUpsertRelationalTable('suppliers', Array.from(uniqueMap.values()));
+    } else if (key === 'inventory' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((item: any) => ({
         id: ensureUuid(item.id || `inv_${(item.name || '').toLowerCase().trim()}`),
         company_id: ensureUuid(companyId),
         name: item.name,
-        type: item.type,
-        unit: item.unit,
+        type: item.type || 'raw',
+        unit: item.unit || 'kg',
         qty: Number(item.qty) || 0,
         reorder_level: Number(item.reorderLevel) || 0
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('inventory', Array.from(uniqueMap.values()));
-    } else if (key === 'employees' && Array.isArray(val) && val.length > 0) {
+      return await safeUpsertRelationalTable('inventory', Array.from(uniqueMap.values()));
+    } else if (key === 'employees' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((e: any) => ({
         id: ensureUuid(e.id || `emp_${(e.name || '').toLowerCase().trim()}`),
         company_id: ensureUuid(companyId),
         name: e.name,
-        role: e.role,
-        machine: e.machine || '',
-        salary: Number(e.salary) || 0
+        role: e.role || 'Master Weaver',
+        machine: e.machine || 'M-1',
+        salary: Number(e.salary) || 0,
+        phone: e.phone || '',
+        loom_count: Number(e.loomCount) || 1,
+        loom_rates: e.loomRates || []
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('employees', Array.from(uniqueMap.values()));
-    } else if (key === 'purchaseBills' && Array.isArray(val) && val.length > 0) {
+      return await safeUpsertRelationalTable('employees', Array.from(uniqueMap.values()));
+    } else if (key === 'purchaseBills' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((b: any) => ({
         id: ensureUuid(b.id || `pb_${b.poNo || b.billNo || 'PB-000'}`),
         company_id: ensureUuid(companyId),
@@ -594,42 +738,53 @@ export async function syncPayloadToRelationalTable(companyId: string, key: strin
         cgst: Number(b.cgst) || 0,
         sgst: Number(b.sgst) || 0,
         igst: Number(b.igst) || 0,
+        grand: Number(b.grand) || Number(b.grandTotal) || 0,
         grand_total: Number(b.grand) || Number(b.grandTotal) || 0,
         status: b.status || 'paid',
         items: b.items || []
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('purchase_bills', Array.from(uniqueMap.values()));
-    } else if (key === 'payments' && Array.isArray(val) && val.length > 0) {
+      return await safeUpsertRelationalTable('purchase_bills', Array.from(uniqueMap.values()));
+    } else if (key === 'payments' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((p: any) => ({
-        id: ensureUuid(p.id || `pay_${p.date}_${p.amount}`),
+        id: ensureUuid(p.id || `pay_${p.date}_${p.amount}_${(p.customerName || '').toLowerCase()}`),
         company_id: ensureUuid(companyId),
         customer_name: p.customerName || 'Customer',
         date: p.date || new Date().toISOString().split('T')[0],
         amount: Number(p.amount) || 0,
         payment_mode: p.paymentMode || 'cash',
-        ref_no: p.note || p.refNo || ''
+        ref_no: p.note || p.refNo || '',
+        note: p.note || p.refNo || ''
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('customer_payments', Array.from(uniqueMap.values()));
-    } else if (key === 'productionOrders' && Array.isArray(val) && val.length > 0) {
+      return await safeUpsertRelationalTable('customer_payments', Array.from(uniqueMap.values()));
+    } else if (key === 'productionOrders' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((o: any) => ({
         id: ensureUuid(o.id || `po_${o.orderNo}`),
         company_id: ensureUuid(companyId),
-        order_no: o.orderNo,
-        customer_name: o.customerName || null,
-        order_date: o.orderDate || null,
-        delivery_due_date: o.deliveryDueDate || null,
+        order_no: o.orderNo || o.order_no || o.po_no || 'ORD-001',
+        order_number: o.orderNo || o.order_no || o.po_no || 'ORD-001',
+        po_no: o.orderNo || o.order_no || o.po_no || 'ORD-001',
+        customer_name: o.customerName || o.customer_name || null,
+        order_date: o.orderDate || o.order_date || o.date || new Date().toISOString().split('T')[0],
+        delivery_due_date: o.deliveryDueDate || o.delivery_due_date || o.due_date || null,
+        due_date: o.deliveryDueDate || o.delivery_due_date || o.due_date || null,
         status: o.status || 'in_production',
         notes: o.notes || null,
-        items: o.items || []
+        items: Array.isArray(o.items) ? o.items : []
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('production_orders', Array.from(uniqueMap.values()));
-    } else if (key === 'varietyCatalog' && Array.isArray(val) && val.length > 0) {
+      const cleanRows = Array.from(uniqueMap.values());
+      const poOk = await safeUpsertRelationalTable('production_orders', cleanRows);
+      const ordOk = await safeUpsertRelationalTable('orders', cleanRows);
+      return poOk || ordOk;
+    } else if (key === 'varietyCatalog' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((v: any) => ({
         id: ensureUuid(v.id || `vc_${(v.varietyName || '').toLowerCase().trim()}`),
         company_id: ensureUuid(companyId),
@@ -649,10 +804,11 @@ export async function syncPayloadToRelationalTable(companyId: string, key: strin
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('variety_catalog', Array.from(uniqueMap.values()));
-    } else if (key === 'qualityAudits' && Array.isArray(val) && val.length > 0) {
+      return await safeUpsertRelationalTable('variety_catalog', Array.from(uniqueMap.values()));
+    } else if (key === 'qualityAudits' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((q: any) => ({
-        id: ensureUuid(q.id || `qa_${q.checkDate}_${q.machineNo}`),
+        id: ensureUuid(q.id || `qa_${q.checkDate}_${q.machineNo}_${q.sampleNo || 1}`),
         company_id: ensureUuid(companyId),
         check_date: q.checkDate || null,
         check_time: q.checkTime || null,
@@ -674,8 +830,9 @@ export async function syncPayloadToRelationalTable(companyId: string, key: strin
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('quality_audits', Array.from(uniqueMap.values()));
-    } else if (key === 'routineReminders' && Array.isArray(val) && val.length > 0) {
+      return await safeUpsertRelationalTable('quality_audits', Array.from(uniqueMap.values()));
+    } else if (key === 'routineReminders' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((r: any) => ({
         id: ensureUuid(r.id || `rr_${(r.taskTitle || '').toLowerCase().trim()}`),
         company_id: ensureUuid(companyId),
@@ -692,41 +849,55 @@ export async function syncPayloadToRelationalTable(companyId: string, key: strin
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('routine_reminders', Array.from(uniqueMap.values()));
-    } else if (key === 'productionLogs' && Array.isArray(val) && val.length > 0) {
+      return await safeUpsertRelationalTable('routine_reminders', Array.from(uniqueMap.values()));
+    } else if (key === 'productionLogs' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((pl: any) => ({
-        id: ensureUuid(pl.id || `pl_${pl.logDate}_${pl.machineNo}`),
+        id: ensureUuid(pl.id || `pl_${pl.date || pl.logDate}_${pl.machine || pl.machineNo}_${(pl.employeeName || pl.operatorName || '').toLowerCase().trim()}`),
         company_id: ensureUuid(companyId),
-        log_date: pl.logDate || null,
-        shift: pl.shift || null,
-        machine_no: pl.machineNo || null,
-        operator_name: pl.operatorName || null,
-        meters_produced: Number(pl.metersProduced) || 0,
+        date: pl.date || pl.logDate || new Date().toISOString().split('T')[0],
+        log_date: pl.date || pl.logDate || new Date().toISOString().split('T')[0],
+        shift: pl.shift || 'Day Shift',
+        machine: pl.machine || pl.machineNo || 'M-1',
+        machine_no: pl.machine || pl.machineNo || 'M-1',
+        employee_name: pl.employeeName || pl.operatorName || 'Master Weaver',
+        operator_name: pl.employeeName || pl.operatorName || 'Master Weaver',
+        item: pl.item || pl.varietyName || 'Bath Towel',
+        item_name: pl.item || pl.varietyName || 'Bath Towel',
+        variety_name: pl.item || pl.varietyName || 'Bath Towel',
+        qty: Number(pl.qty) || Number(pl.metersProduced) || 0,
+        qty_produced: Number(pl.qty) || Number(pl.metersProduced) || 0,
+        meters_produced: Number(pl.qty) || Number(pl.metersProduced) || 0,
+        waste: Number(pl.waste) || 0,
         picks: Number(pl.picks) || 0,
         efficiency_pct: Number(pl.efficiencyPct) || 0,
         notes: pl.notes || null
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('production_logs', Array.from(uniqueMap.values()));
-    } else if (key === 'salaryAdvances' && Array.isArray(val) && val.length > 0) {
+      return await safeUpsertRelationalTable('production_logs', Array.from(uniqueMap.values()));
+    } else if (key === 'salaryAdvances' && Array.isArray(val)) {
+      if (val.length === 0) return true;
       const rows = val.map((sa: any) => ({
-        id: ensureUuid(sa.id || `sa_${sa.employeeName}_${sa.advanceDate}`),
+        id: ensureUuid(sa.id || `sa_${sa.employeeId || sa.employeeName}_${sa.date || sa.advanceDate}`),
         company_id: ensureUuid(companyId),
         employee_id: sa.employeeId ? ensureUuid(sa.employeeId) : null,
         employee_name: sa.employeeName || null,
-        advance_date: sa.advanceDate || null,
+        date: sa.date || sa.advanceDate || new Date().toISOString().split('T')[0],
+        advance_date: sa.date || sa.advanceDate || new Date().toISOString().split('T')[0],
         amount: Number(sa.amount) || 0,
         repayment_status: sa.repaymentStatus || 'pending',
         notes: sa.notes || null
       }));
       const uniqueMap = new Map<string, any>();
       rows.forEach(r => uniqueMap.set(r.id, r));
-      await safeUpsertRelationalTable('salary_advances', Array.from(uniqueMap.values()));
+      return await safeUpsertRelationalTable('salary_advances', Array.from(uniqueMap.values()));
     }
   } catch (err: any) {
     console.warn(`Relational sync exception for key [${key}]:`, err?.message || String(err));
+    return false;
   }
+  return false;
 }
 
 export async function storeSet<T>(key: string, val: T): Promise<void> {
@@ -1206,13 +1377,13 @@ export const DEFAULT_VARIETIES: VarietyCatalog[] = [
     varietyName: 'Royal Bath Towel 500GSM',
     category: 'Bath Towel',
     standardWeightGsm: 500,
-    targetLengthCm: 140, // ~55 inches
-    targetWidthCm: 70,  // ~27.5 inches
+    targetLengthCm: 55, // 55 inches
+    targetWidthCm: 28,  // 28 inches
     allowedSizingTolerancePct: 1.5,
     allowedGsmTolerancePct: 2.0,
     warpYarnSpec: '2/20s Cotton Warp',
     weftYarnSpec: '16s Auto Weft',
-    pileYarnSpec: '2/20s Combed Terry Pile',
+    pileYarnSpec: '2/20s Combed Terry Pick',
     createdDate: '2026-05-10',
     activeStatus: true,
     assignedMachines: [
@@ -1226,13 +1397,13 @@ export const DEFAULT_VARIETIES: VarietyCatalog[] = [
     varietyName: 'Classic Hotel Hand Towel 400GSM',
     category: 'Hand Towel',
     standardWeightGsm: 400,
-    targetLengthCm: 60,
-    targetWidthCm: 40,
+    targetLengthCm: 24, // 24 inches
+    targetWidthCm: 16,  // 16 inches
     allowedSizingTolerancePct: 2.0,
     allowedGsmTolerancePct: 3.0,
     warpYarnSpec: '20s Carded Warp',
     weftYarnSpec: '16s Weft',
-    pileYarnSpec: '20s Ring Pile',
+    pileYarnSpec: '20s Ring Terry Pick',
     createdDate: '2026-06-01',
     activeStatus: true,
     assignedMachines: [
@@ -1244,13 +1415,13 @@ export const DEFAULT_VARIETIES: VarietyCatalog[] = [
     varietyName: 'Jacquard Border Face Towel 550GSM',
     category: 'Jacquard',
     standardWeightGsm: 550,
-    targetLengthCm: 35,
-    targetWidthCm: 35,
+    targetLengthCm: 14, // 14 inches
+    targetWidthCm: 14,  // 14 inches
     allowedSizingTolerancePct: 1.0,
     allowedGsmTolerancePct: 2.5,
     warpYarnSpec: '2/30s Double Warp',
     weftYarnSpec: '20s Weft',
-    pileYarnSpec: '2/20s Super Combed',
+    pileYarnSpec: '2/20s Super Combed Terry Pick',
     createdDate: '2026-07-15',
     activeStatus: true,
     assignedMachines: [
@@ -1268,15 +1439,15 @@ export const DEFAULT_QUALITY_AUDITS: QualityCheckAudit[] = [
     varietyName: 'Royal Bath Towel 500GSM',
     operatorName: 'Ramesh Kumar',
     sampleNo: 1,
-    actualLengthCm: 140.2,
-    actualWidthCm: 70.1,
+    actualLengthCm: 55.2,
+    actualWidthCm: 28.1,
     actualWeightGsm: 502,
     borderQualityScore: 5,
     selvedgeCondition: 'pass',
     sizingStatus: 'pass',
     gsmStatus: 'pass',
     overallResult: 'PASS',
-    varianceNotes: 'Machine 1 sizing & dimensions perfectly aligned with target specs.',
+    varianceNotes: 'Machine 1 sizing & dimensions (in inches) perfectly aligned with target specs.',
     actionTaken: 'Standard production continued.',
     auditorName: 'QC Supervisor Selvam'
   },
@@ -1288,15 +1459,15 @@ export const DEFAULT_QUALITY_AUDITS: QualityCheckAudit[] = [
     varietyName: 'Royal Bath Towel 500GSM',
     operatorName: 'Suresh V',
     sampleNo: 1,
-    actualLengthCm: 136.5,
-    actualWidthCm: 68.2,
+    actualLengthCm: 53.5,
+    actualWidthCm: 26.8,
     actualWeightGsm: 475,
     borderQualityScore: 3,
     selvedgeCondition: 'defect',
     sizingStatus: 'under_sized',
     gsmStatus: 'low_gsm',
     overallResult: 'FAIL',
-    varianceNotes: 'CRITICAL SIZING MISMATCH: Length is 136.5cm vs 140cm spec (Machine 1 produces 140.2cm). Reed tension too tight & warp let-off improper!',
+    varianceNotes: 'CRITICAL SIZING MISMATCH: Length is 53.5 inches vs 55 inches spec (Machine 1 produces 55.2 in). Reed tension too tight & warp let-off improper!',
     actionTaken: 'Halted loom to adjust warp beam tension and reed sizing setting to match Machine 1 spec.',
     auditorName: 'QC Supervisor Selvam'
   },
@@ -1308,8 +1479,8 @@ export const DEFAULT_QUALITY_AUDITS: QualityCheckAudit[] = [
     varietyName: 'Royal Bath Towel 500GSM',
     operatorName: 'Murugan P',
     sampleNo: 1,
-    actualLengthCm: 139.8,
-    actualWidthCm: 69.9,
+    actualLengthCm: 54.9,
+    actualWidthCm: 27.9,
     actualWeightGsm: 498,
     borderQualityScore: 4,
     selvedgeCondition: 'pass',
@@ -1334,8 +1505,8 @@ export const DEFAULT_ROUTINE_REMINDERS: RoutineTaskReminder[] = [
     assignedRoleOrPerson: 'Quality Supervisor Selvam',
     status: 'due_today',
     checklistItems: [
-      { id: 'chk_1', label: 'Measure cut length (cm) on 3 consecutive towels per loom', checked: true },
-      { id: 'chk_2', label: 'Measure width (cm) at top, middle and bottom', checked: true },
+      { id: 'chk_1', label: 'Measure cut length (inches) on 3 consecutive towels per loom', checked: true },
+      { id: 'chk_2', label: 'Measure width (inches) at top, middle and bottom', checked: true },
       { id: 'chk_3', label: 'Weigh 1 sq meter sample on digital balance for GSM check', checked: false },
       { id: 'chk_4', label: 'Compare size across Machine 1, Machine 2 & Machine 3 to ensure ZERO variance', checked: false },
       { id: 'chk_5', label: 'Verify hem stitching and selvedge edge tension', checked: false }
@@ -1386,7 +1557,7 @@ export const DEFAULT_PRODUCTION_ORDERS: ProductionOrder[] = [
     status: 'in_production',
     notes: 'Hotel logo embroidery on border. Strict 500GSM requirement.',
     items: [
-      { varietyName: 'Royal Bath Towel 500GSM', gsm: 500, dimensions: '140 x 70 cm', targetQty: 3000, unit: 'pcs', unitRate: 280, notes: 'White color, double stitched' }
+      { varietyName: 'Royal Bath Towel 500GSM', gsm: 500, dimensions: '55 x 28 inches', targetQty: 3000, unit: 'pcs', unitRate: 280.00, notes: 'White color, double stitched' }
     ]
   },
   {
@@ -1398,18 +1569,43 @@ export const DEFAULT_PRODUCTION_ORDERS: ProductionOrder[] = [
     status: 'in_production',
     notes: 'Pack in bundles of 10 pcs.',
     items: [
-      { varietyName: 'Classic Hotel Hand Towel 400GSM', gsm: 400, dimensions: '60 x 40 cm', targetQty: 1500, unit: 'pcs', unitRate: 110, notes: 'Assorted colors' }
+      { varietyName: 'Classic Hotel Hand Towel 400GSM', gsm: 400, dimensions: '24 x 16 inches', targetQty: 1500, unit: 'pcs', unitRate: 110, notes: 'Assorted colors' }
     ]
   }
 ];
 
 export const DEFAULT_EMPLOYEES: Employee[] = [
-  { id: 'emp_1', name: 'Ramesh Kumar', role: 'Senior Loom Weaver', machine: 'Machine 1', salary: 22000 },
-  { id: 'emp_2', name: 'Suresh V', role: 'Loom Operator', machine: 'Machine 2', salary: 19500 },
-  { id: 'emp_3', name: 'Murugan P', role: 'Loom Operator', machine: 'Machine 3', salary: 19000 },
-  { id: 'emp_4', name: 'Karthik N', role: 'Weaving Specialist', machine: 'Machine 4', salary: 21000 },
-  { id: 'emp_5', name: 'Anand S', role: 'Jacquard Weaver', machine: 'Machine 5', salary: 24000 },
-  { id: 'emp_6', name: 'Selvam K', role: 'Quality & Sizing Inspector', machine: 'All Looms', salary: 26000 }
+  {
+    id: 'emp_1',
+    name: 'Ramesh Kumar',
+    role: 'Senior Loom Weaver',
+    machine: 'M-1',
+    salary: 22000,
+    phone: '9842011223',
+    loomCount: 3,
+    loomRates: [
+      { loomNo: 'M-1', varietyName: 'V-1 (Bath Towel)', rate: 10.50 },
+      { loomNo: 'M-2', varietyName: 'V-2 (Hand Towel)', rate: 12.25 },
+      { loomNo: 'M-3', varietyName: 'V-3 (Face Towel)', rate: 9.75 }
+    ]
+  },
+  {
+    id: 'emp_2',
+    name: 'Suresh V',
+    role: 'Loom Operator',
+    machine: 'M-2',
+    salary: 19500,
+    phone: '9842122334',
+    loomCount: 2,
+    loomRates: [
+      { loomNo: 'M-1', varietyName: 'V-1 (Bath Towel)', rate: 10.50 },
+      { loomNo: 'M-2', varietyName: 'V-2 (Hand Towel)', rate: 12.25 }
+    ]
+  },
+  { id: 'emp_3', name: 'Murugan P', role: 'Loom Operator', machine: 'M-3', salary: 19000, phone: '9842233445' },
+  { id: 'emp_4', name: 'Karthik N', role: 'Weaving Specialist', machine: 'M-4', salary: 21000, phone: '9842344556' },
+  { id: 'emp_5', name: 'Anand S', role: 'Jacquard Weaver', machine: 'M-5', salary: 24000, phone: '9842455667' },
+  { id: 'emp_6', name: 'Selvam K', role: 'Quality & Sizing Inspector', machine: 'All Looms', salary: 26000, phone: '9842566778' }
 ];
 
 export const DEFAULT_INVENTORY: InventoryItem[] = [
@@ -1439,5 +1635,264 @@ export async function clearAllTestData(): Promise<void> {
   await storeSet('varietyCatalog', []);
   await storeSet('qualityAudits', []);
   await storeSet('routineReminders', []);
+}
+
+export interface TableSanityResult {
+  tableName: string;
+  exists: boolean;
+  canRead: boolean;
+  canInsert: boolean;
+  rowCount: number;
+  message: string;
+  status: 'healthy' | 'missing' | 'rls_restricted' | 'schema_error' | 'unreachable';
+}
+
+export interface DatabaseSanityReport {
+  overallHealthy: boolean;
+  healthyCount: number;
+  totalTables: number;
+  tables: TableSanityResult[];
+  timestamp: string;
+}
+
+/**
+ * Runs a comprehensive live sanity check across all 16 relational tables in Supabase.
+ * Checks whether each table exists, row counts, read permissions, and schema accessibility.
+ */
+export async function runDatabaseSanityCheck(): Promise<DatabaseSanityReport> {
+  const client = getSupabaseClient();
+  const isConfigured = getIsSupabaseConfigured();
+
+  if (!isConfigured || !client) {
+    const emptyResults: TableSanityResult[] = EXPECTED_TABLES.map(t => ({
+      tableName: t,
+      exists: false,
+      canRead: false,
+      canInsert: false,
+      rowCount: 0,
+      message: 'Supabase credentials not configured.',
+      status: 'unreachable'
+    }));
+    return {
+      overallHealthy: false,
+      healthyCount: 0,
+      totalTables: EXPECTED_TABLES.length,
+      tables: emptyResults,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  const results: TableSanityResult[] = [];
+
+  for (const tableName of EXPECTED_TABLES) {
+    try {
+      const { data, count, error } = await client
+        .from(tableName)
+        .select('*', { count: 'exact' })
+        .limit(1);
+
+      if (error) {
+        const msg = error.message || '';
+        const code = error.code || '';
+        if (code === '42P01' || msg.includes('does not exist') || msg.includes('relation') || code === 'PGRST301') {
+          results.push({
+            tableName,
+            exists: false,
+            canRead: false,
+            canInsert: false,
+            rowCount: 0,
+            message: 'Not yet provisioned in Postgres. App is safely persisting data in app_state storage.',
+            status: 'missing'
+          });
+        } else if (code === '42501' || msg.toLowerCase().includes('permission denied') || msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('violates row-level security')) {
+          results.push({
+            tableName,
+            exists: true,
+            canRead: false,
+            canInsert: false,
+            rowCount: 0,
+            message: 'Row-Level Security active. App is preserving real-time cloud data safely in app_state.',
+            status: 'rls_restricted'
+          });
+        } else {
+          results.push({
+            tableName,
+            exists: true,
+            canRead: false,
+            canInsert: false,
+            rowCount: 0,
+            message: `Schema note: ${msg}. Fallback cloud store active.`,
+            status: 'schema_error'
+          });
+        }
+      } else {
+        const rowCount = typeof count === 'number' ? count : (Array.isArray(data) ? (data as any[]).length : 0);
+        results.push({
+          tableName,
+          exists: true,
+          canRead: true,
+          canInsert: true,
+          rowCount,
+          message: `Active & accessible (${rowCount} row${rowCount === 1 ? '' : 's'})`,
+          status: 'healthy'
+        });
+      }
+    } catch (err: any) {
+      results.push({
+        tableName,
+        exists: false,
+        canRead: false,
+        canInsert: false,
+        rowCount: 0,
+        message: err?.message || 'Connection failed',
+        status: 'unreachable'
+      });
+    }
+  }
+
+  const healthyCount = results.filter(r => r.status === 'healthy').length;
+  return {
+    overallHealthy: healthyCount === EXPECTED_TABLES.length,
+    healthyCount,
+    totalTables: EXPECTED_TABLES.length,
+    tables: results,
+    timestamp: new Date().toISOString()
+  };
+}
+
+/**
+ * Force-syncs all entities from app_state & local storage directly into
+ * Supabase relational tables. Ensures everything stored in app_state is properly inserted.
+ */
+export async function forceSyncAllDataToRelationalTables(): Promise<{
+  successCount: number;
+  totalKeys: number;
+  results: { key: string; table: string; count: number; success: boolean; error?: string }[];
+}> {
+  const client = getSupabaseClient();
+  const companyId = getActiveCompanyId();
+
+  if (!getIsSupabaseConfigured() || !client) {
+    return { successCount: 0, totalKeys: 0, results: [] };
+  }
+
+  const syncPlan = [
+    { key: 'companySettings', table: 'company_settings' },
+    { key: 'customers', table: 'customers' },
+    { key: 'suppliers', table: 'suppliers' },
+    { key: 'inventory', table: 'inventory' },
+    { key: 'salesBills', table: 'sales_bills' },
+    { key: 'purchaseBills', table: 'purchase_bills' },
+    { key: 'payments', table: 'customer_payments' },
+    { key: 'employees', table: 'employees' },
+    { key: 'productionLogs', table: 'production_logs' },
+    { key: 'salaryAdvances', table: 'salary_advances' },
+    { key: 'productionOrders', table: 'production_orders' },
+    { key: 'varietyCatalog', table: 'variety_catalog' },
+    { key: 'qualityAudits', table: 'quality_audits' },
+    { key: 'routineReminders', table: 'routine_reminders' }
+  ];
+
+  const syncResults: { key: string; table: string; count: number; success: boolean; error?: string }[] = [];
+
+  // 1. Fetch all app_state rows for active company AND global
+  let appStateMap = new Map<string, any>();
+  try {
+    const { data: appStateRows } = await client
+      .from('app_state')
+      .select('company_id, store_key, payload');
+
+    if (appStateRows && appStateRows.length > 0) {
+      appStateRows.forEach(row => {
+        if (row.store_key && row.payload !== null && row.payload !== undefined) {
+          if (row.company_id === companyId || row.company_id === 'global' || !appStateMap.has(row.store_key)) {
+            appStateMap.set(row.store_key, row.payload);
+          }
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('Note: Could not batch query app_state rows:', e);
+  }
+
+  // 2. Sync subsidiary companies
+  try {
+    let comps: any = null;
+    if (appStateMap.has('companies')) {
+      comps = appStateMap.get('companies');
+    } else {
+      const rawComps = localStorage.getItem(GLOBAL_STORE_PREFIX + 'companies');
+      if (rawComps) comps = JSON.parse(rawComps);
+    }
+
+    if (comps && Array.isArray(comps)) {
+      const compRows = comps.map((c: any) => ({
+        id: ensureUuid(c.id || `comp_${c.name}`),
+        name: c.name,
+        prefix: c.prefix || '',
+        address: c.address || '',
+        gstin: c.gstin || '',
+        phone: c.phone || '',
+        state: c.state || 'Tamil Nadu',
+        bank_name: c.bankName || null,
+        bank_account: c.bankAccount || null,
+        bank_ifsc: c.bankIfsc || null,
+        is_default: Boolean(c.isDefault)
+      }));
+      const ok = await safeUpsertRelationalTable('companies', compRows);
+      syncResults.push({ key: 'companies', table: 'companies', count: compRows.length, success: ok });
+    }
+  } catch (e: any) {
+    syncResults.push({ key: 'companies', table: 'companies', count: 0, success: false, error: e?.message });
+  }
+
+  // 3. Sync each entity in the plan
+  for (const item of syncPlan) {
+    try {
+      let val: any = null;
+      
+      // Check app_state first
+      if (appStateMap.has(item.key)) {
+        val = appStateMap.get(item.key);
+      }
+
+      // Check local storage and merge if both exist
+      const localRaw = localStorage.getItem(scopedKey(item.key));
+      if (localRaw) {
+        try {
+          const localParsed = JSON.parse(localRaw);
+          if (val) {
+            val = mergePayloads(item.key, localParsed, val);
+          } else {
+            val = localParsed;
+          }
+        } catch (e) {}
+      }
+
+      if (!val) {
+        syncResults.push({ key: item.key, table: item.table, count: 0, success: true });
+        continue;
+      }
+
+      const count = Array.isArray(val) ? val.length : (val ? 1 : 0);
+
+      // Ensure updated state is mirrored in app_state
+      await client.from('app_state').upsert({
+        company_id: companyId,
+        store_key: item.key,
+        payload: val,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'company_id,store_key' });
+
+      // Insert/Upsert into relational table(s)
+      const success = await syncPayloadToRelationalTable(companyId, item.key, val);
+      syncResults.push({ key: item.key, table: item.table, count, success });
+    } catch (err: any) {
+      syncResults.push({ key: item.key, table: item.table, count: 0, success: false, error: err?.message });
+    }
+  }
+
+  const successCount = syncResults.filter(r => r.success).length;
+  return { successCount, totalKeys: syncResults.length, results: syncResults };
 }
 

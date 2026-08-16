@@ -22,7 +22,8 @@ import {
   User,
   DollarSign,
   ChevronRight,
-  Receipt
+  Receipt,
+  Edit
 } from 'lucide-react';
 
 interface CustomersTabProps {
@@ -70,6 +71,8 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
   const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
   const [payNote, setPayNote] = useState('Cash Payment');
 
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+
   // Customer Form
   const [form, setForm] = useState<Customer>({
     name: '',
@@ -81,25 +84,87 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
     gstin: ''
   });
 
-  // Handle Save New Customer
+  const handleOpenAddModal = () => {
+    setEditingCustomer(null);
+    setForm({
+      name: '',
+      phone: '',
+      place: '',
+      address: '',
+      pincode: '',
+      state: 'Tamil Nadu',
+      gstin: ''
+    });
+    setShowAddModal(true);
+  };
+
+  const handleOpenEdit = (cust: Customer) => {
+    setEditingCustomer(cust);
+    setForm({
+      id: cust.id,
+      name: cust.name,
+      phone: cust.phone || '',
+      place: cust.place || '',
+      address: cust.address || cust.place || '',
+      pincode: cust.pincode || '',
+      state: cust.state || 'Tamil Nadu',
+      gstin: cust.gstin || ''
+    });
+    setShowAddModal(true);
+  };
+
+  // Handle Save Customer (Create or Update)
   const handleSaveCustomer = async () => {
     if (!form.name.trim()) {
       showToast('Please enter customer name');
       return;
     }
 
-    const newCustomer: Customer = {
-      ...form,
-      id: crypto.randomUUID(),
-      name: form.name.trim(),
-      address: form.address || form.place
-    };
+    if (editingCustomer) {
+      let updated = customers.map((c) => {
+        if ((c.id && editingCustomer.id && c.id === editingCustomer.id) || c.name.toLowerCase().trim() === editingCustomer.name.toLowerCase().trim()) {
+          return {
+            ...c,
+            ...form,
+            name: form.name.trim(),
+            address: form.address || form.place
+          };
+        }
+        return c;
+      });
 
-    const updated = [newCustomer, ...customers];
-    setCustomers(updated);
-    await storeSet('customers', updated);
+      const existsInList = customers.some((c) => (c.id && editingCustomer.id && c.id === editingCustomer.id) || c.name.toLowerCase().trim() === editingCustomer.name.toLowerCase().trim());
+      if (!existsInList) {
+        updated = [
+          {
+            ...form,
+            id: editingCustomer.id || crypto.randomUUID(),
+            name: form.name.trim(),
+            address: form.address || form.place
+          },
+          ...updated
+        ];
+      }
 
-    showToast(`Customer "${newCustomer.name}" registered successfully!`);
+      setCustomers(updated);
+      await storeSet('customers', updated);
+      showToast(`Customer "${form.name.trim()}" updated successfully!`);
+      setEditingCustomer(null);
+    } else {
+      const newCustomer: Customer = {
+        ...form,
+        id: crypto.randomUUID(),
+        name: form.name.trim(),
+        address: form.address || form.place
+      };
+
+      const updated = [newCustomer, ...customers];
+      setCustomers(updated);
+      await storeSet('customers', updated);
+
+      showToast(`Customer "${newCustomer.name}" registered successfully!`);
+    }
+
     setShowAddModal(false);
     setForm({
       name: '',
@@ -428,7 +493,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
           </button>
 
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={handleOpenAddModal}
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-2 transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -607,6 +672,14 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
                           >
                             <Plus className="w-3.5 h-3.5 text-emerald-600" />
                             <span>Payment</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleOpenEdit(c)}
+                            className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 transition-colors cursor-pointer"
+                            title="Edit Customer Details"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
                           </button>
 
                           <button
@@ -987,7 +1060,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+              <div className="flex justify-end gap-2 pt-3 pb-1 border-t border-slate-200 bg-white sticky bottom-0 z-20 mt-3 -mb-1">
                 <button
                   type="button"
                   onClick={() => setShowPaymentModal(false)}
@@ -998,7 +1071,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
                 <button
                   type="button"
                   onClick={() => handleRecordPayment()}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
                 >
                   <Save className="w-4 h-4" />
                   <span>Record Payment</span>
@@ -1015,7 +1088,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col my-auto">
             {/* Sticky Header */}
             <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between border-b border-slate-800 shrink-0 sticky top-0 z-20">
-              <h3 className="text-sm font-bold m-0 text-white">Register New Customer</h3>
+              <h3 className="text-sm font-bold m-0 text-white">{editingCustomer ? 'Edit Customer Details' : 'Register New Customer'}</h3>
               <button
                 onClick={() => setShowAddModal(false)}
                 aria-label="Close"
@@ -1084,7 +1157,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+              <div className="flex justify-end gap-2 pt-3 pb-1 border-t border-slate-200 bg-white sticky bottom-0 z-20 mt-3 -mb-1">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
@@ -1095,7 +1168,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({
                 <button
                   type="button"
                   onClick={handleSaveCustomer}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
                 >
                   <Save className="w-4 h-4" />
                   <span>Save Customer</span>

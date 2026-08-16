@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import QRCode from 'qrcode';
 import {
   CompanySettings,
   SubsidiaryCompany,
@@ -94,6 +95,18 @@ import {
   Info
 } from 'lucide-react';
 
+// Date formatter helper dd/mm/yyyy
+const formatDateDDMMYYYY = (dateStr?: string): string => {
+  if (!dateStr) return '';
+  if (dateStr.includes('/')) return dateStr;
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const [yyyy, mm, dd] = parts;
+    return `${dd.padStart(2, '0')}/${mm.padStart(2, '0')}/${yyyy}`;
+  }
+  return dateStr;
+};
+
 export default function App() {
   // Navigation State
   const [activePage, setActivePage] = useState<string>('dashboard');
@@ -156,9 +169,32 @@ export default function App() {
 
   // Sales Bill Preview & Live Edit State
   const [previewBill, setPreviewBill] = useState<SalesBill | null>(null);
+  const [previewQrCode, setPreviewQrCode] = useState<string>('');
   const [isEditingPreview, setIsEditingPreview] = useState(false);
   const [editBillData, setEditBillData] = useState<SalesBill | null>(null);
   const [billCopyType, setBillCopyType] = useState<'original' | 'transport' | 'supplier'>('original');
+
+  // Auto-generate QR code for preview modal
+  useEffect(() => {
+    if (previewBill) {
+      const ref = previewBill.billNo;
+      const roundedGrand = Math.round(previewBill.grand);
+      const qrPayload = `INVOICE: ${ref}\nGRAND TOTAL: ₹${roundedGrand.toFixed(2)}\nDATE: ${formatDateDDMMYYYY(previewBill.date)}\nPARTY: ${previewBill.customerName}`;
+      QRCode.toDataURL(qrPayload, {
+        width: 100,
+        margin: 1,
+        errorCorrectionLevel: 'M',
+        color: {
+          dark: '#0f172a',
+          light: '#ffffff'
+        }
+      })
+        .then((url) => setPreviewQrCode(url))
+        .catch((err) => console.error('Preview QR generation error:', err));
+    } else {
+      setPreviewQrCode('');
+    }
+  }, [previewBill]);
 
   // Sales Bill Customer Selection & Registration Modal State
   const [sbCustPhone, setSbCustPhone] = useState('');
@@ -201,6 +237,7 @@ export default function App() {
   const [sbCustState, setSbCustState] = useState('Tamil Nadu');
   const [sbDispatchThrough, setSbDispatchThrough] = useState('');
   const [sbArticleNo, setSbArticleNo] = useState('');
+  const [sbOrderNo, setSbOrderNo] = useState('');
   const [sbItems, setSbItems] = useState<any[]>([{ name: '', hsn: '6304', qty: 0, rate: 0, taxRate: 5, discPct: 0 }]);
 
   // Purchase Bill Form State
@@ -600,6 +637,65 @@ export default function App() {
     }
   };
 
+  // Convert Production Order directly to Sales Bill (Supports Partial Lots)
+  const handleConvertOrderToSalesBill = (
+    order: ProductionOrder, 
+    partialItems?: Array<{ varietyName: string; qty: number; unitRate: number; dimensions?: string; unit?: string }>
+  ) => {
+    // 1. Match or fill customer details
+    const matchedCustomer = customers.find((c) => c.name.toLowerCase().trim() === order.customerName.toLowerCase().trim());
+    setSbCustomer(order.customerName);
+    if (matchedCustomer) {
+      setSbCustState(matchedCustomer.state || 'Tamil Nadu');
+      setSbCustPhone(matchedCustomer.phone || '');
+      setSbCustGstin(matchedCustomer.gstin || '');
+      setSbCustAddress(matchedCustomer.address || matchedCustomer.place || '');
+      setSbCustPincode(matchedCustomer.pincode || '');
+    } else {
+      setSbCustState('Tamil Nadu');
+      setSbCustPhone('');
+      setSbCustGstin('');
+      setSbCustAddress('');
+      setSbCustPincode('');
+    }
+
+    // 2. Pre-fill article / order reference
+    setSbOrderNo(order.orderNo || '');
+    setSbArticleNo(order.orderNo || '');
+
+    // 3. Map items: if partialItems provided use them, else full order items
+    const sourceItems = partialItems && partialItems.length > 0 ? partialItems : order.items;
+    if (sourceItems && sourceItems.length > 0) {
+      const mappedItems = sourceItems.map((it: any) => {
+        const qty = Number(it.qty !== undefined ? it.qty : it.targetQty) || 1;
+        const rate = Number(it.unitRate) || 0;
+        return {
+          name: it.varietyName,
+          hsn: '6304',
+          qty: qty,
+          rate: rate,
+          taxRate: 5,
+          discPct: 0
+        };
+      });
+      setSbItems(mappedItems);
+    } else {
+      setSbItems([{ name: '', hsn: '6304', qty: 0, rate: 0, taxRate: 5, discPct: 0 }]);
+    }
+
+    // 4. Ensure current bill number is populated
+    const targetComp = companies.find((c) => c.id === sbCompanyId) || companies[0];
+    if (targetComp) {
+      const nextNo = generateNextBillNoForCompany(targetComp.id, targetComp.prefix, salesBills);
+      setSbBillNo(nextNo);
+    }
+
+    // 5. Navigate to Sales Bills tab
+    setActivePage('salesBills');
+    const totalLotQty = (partialItems || order.items).reduce((s: number, i: any) => s + (Number(i.qty || i.targetQty) || 0), 0);
+    showToast(`Order ${order.orderNo} converted to Sales Bill draft (${totalLotQty} pcs)! Review details & generate invoice.`);
+  };
+
   // GST Split Calculator
   const splitTax = (taxable: number, taxRatePct: number, buyerState: string, homeState: string) => {
     const same = (buyerState || '').trim().toLowerCase() === (homeState || '').trim().toLowerCase();
@@ -666,10 +762,13 @@ export default function App() {
 
   // Handlers for Save Operations
   const handleSaveProductionOrder = async (newOrder: ProductionOrder) => {
-    const updated = [newOrder, ...productionOrders];
+    const exists = productionOrders.some(o => o.id === newOrder.id || o.orderNo.toLowerCase().trim() === newOrder.orderNo.toLowerCase().trim());
+    const updated = exists
+      ? productionOrders.map(o => (o.id === newOrder.id || o.orderNo.toLowerCase().trim() === newOrder.orderNo.toLowerCase().trim() ? newOrder : o))
+      : [newOrder, ...productionOrders];
     setProductionOrders(updated);
     await storeSet('productionOrders', updated);
-    showToast(`Production Order ${newOrder.orderNo} created!`);
+    showToast(`Production Order ${newOrder.orderNo} saved!`);
   };
 
   const handleUpdateOrderStatus = async (orderId: string, status: ProductionOrder['status']) => {
@@ -773,8 +872,8 @@ export default function App() {
     return '33';
   };
 
-  // Invoice Print Preview Generator
-  const openInvoice = (number: string, type: 'sale' | 'purchase', overrideCopyType?: 'original' | 'transport' | 'supplier') => {
+  // Invoice Print Preview Generator with QR Code & Clean Layout
+  const openInvoice = async (number: string, type: 'sale' | 'purchase', overrideCopyType?: 'original' | 'transport' | 'supplier') => {
     const bill = (type === 'sale' ? salesBills : purchaseBills).find((b: any) => (type === 'sale' ? b.billNo : b.poNo) === number);
     if (!bill) return;
     const isSale = type === 'sale';
@@ -810,27 +909,44 @@ export default function App() {
     const roundedGrand = Math.round(bill.grand);
     const roundOff = roundedGrand - bill.grand;
 
+    // Generate QR Code encoding invoice number and grand total for easy scanning
+    let qrCodeDataUrl = '';
+    try {
+      const qrPayload = `INVOICE: ${ref}\nGRAND TOTAL: ₹${roundedGrand.toFixed(2)}\nDATE: ${formatDateDDMMYYYY(bill.date)}\nPARTY: ${party}`;
+      qrCodeDataUrl = await QRCode.toDataURL(qrPayload, {
+        width: 100,
+        margin: 1,
+        errorCorrectionLevel: 'M',
+        color: {
+          dark: '#0f172a',
+          light: '#ffffff'
+        }
+      });
+    } catch (qrErr) {
+      console.error('Error generating QR code for invoice:', qrErr);
+    }
+
     // Maximum 15 items enforced for single page layout
     const displayItems = bill.items.slice(0, 15);
 
     const itemRows = displayItems
       .map(
         (i: any, idx: number) => `<tr>
-      <td style="border:1px solid #0f172a; padding:3px 3px; text-align:center; font-family:monospace; font-size:11.5px;">${idx + 1}</td>
-      <td style="border:1px solid #0f172a; padding:3px 6px; font-weight:bold; font-size:12.5px; color:#0f172a;">${escHtml(i.name)}</td>
-      <td style="border:1px solid #0f172a; padding:3px 3px; text-align:center; font-family:monospace; font-size:11.5px;">${escHtml(i.hsn || '6304')}</td>
-      <td style="border:1px solid #0f172a; padding:3px 3px; text-align:center; font-family:monospace; font-size:11.5px;">${isSalesBill2 ? '0%' : i.taxRate + '%'}</td>
-      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:right; font-family:monospace; font-weight:bold; font-size:12.5px;">${Number(i.qty).toFixed(i.qty % 1 ? 2 : 0)}</td>
-      <td style="border:1px solid #0f172a; padding:3px 3px; text-align:center; font-size:11.5px;">${escHtml(i.unit || 'Pcs')}</td>
-      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:right; font-family:monospace; font-size:12.5px;">${Number(i.rate).toFixed(2)}</td>
-      <td style="border:1px solid #0f172a; padding:3px 3px; text-align:center; font-family:monospace; font-size:11.5px;">${i.discPct ? Number(i.discPct).toFixed(1) + '%' : '—'}</td>
-      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-weight:bold; font-size:12.5px;">${Number(i.taxable).toFixed(2)}</td>
+      <td style="border:1px solid #0f172a; padding:4px 3px; text-align:center; font-family:monospace; font-size:13px;">${idx + 1}</td>
+      <td style="border:1px solid #0f172a; padding:4px 6px; font-weight:bold; font-size:14px; color:#0f172a;">${escHtml(i.name)}</td>
+      <td style="border:1px solid #0f172a; padding:4px 3px; text-align:center; font-family:monospace; font-size:13px;">${escHtml(i.hsn || '6304')}</td>
+      <td style="border:1px solid #0f172a; padding:4px 3px; text-align:center; font-family:monospace; font-size:13px;">${isSalesBill2 ? '0%' : i.taxRate + '%'}</td>
+      <td style="border:1px solid #0f172a; padding:4px 5px; text-align:right; font-family:monospace; font-weight:bold; font-size:14.5px;">${Number(i.qty).toFixed(i.qty % 1 ? 2 : 0)}</td>
+      <td style="border:1px solid #0f172a; padding:4px 3px; text-align:center; font-size:13px;">${escHtml(i.unit || 'Pcs')}</td>
+      <td style="border:1px solid #0f172a; padding:4px 5px; text-align:right; font-family:monospace; font-size:14px;">${Number(i.rate).toFixed(2)}</td>
+      <td style="border:1px solid #0f172a; padding:4px 3px; text-align:center; font-family:monospace; font-size:13px;">${i.discPct ? Number(i.discPct).toFixed(1) + '%' : '—'}</td>
+      <td style="border:1px solid #0f172a; padding:4px 6px; text-align:right; font-family:monospace; font-weight:bold; font-size:14.5px;">${Number(i.taxable).toFixed(2)}</td>
     </tr>`
       )
       .join('');
 
     // Blank space filler row: fills empty space for short bills, omitted for 10-15 items to guarantee single A4 page fit
-    const fillerHeight = displayItems.length >= 10 ? 0 : Math.max(15, 150 - displayItems.length * 16);
+    const fillerHeight = displayItems.length >= 10 ? 0 : Math.max(15, 140 - displayItems.length * 16);
     const fillerRow = fillerHeight > 0 ? `<tr>
       <td style="border-right:1px solid #0f172a; border-left:1px solid #0f172a; height:${fillerHeight}px;"></td>
       <td style="border-right:1px solid #0f172a; height:${fillerHeight}px;"></td>
@@ -857,27 +973,27 @@ export default function App() {
     const hsnRows = Object.entries(hsnMap)
       .map(
         ([hsn, v]: [string, any]) => `<tr>
-      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:center; font-family:monospace; font-size:11px;">${escHtml(hsn)}</td>
-      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-size:11px;">${v.taxable.toFixed(2)}</td>
-      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:center; font-family:monospace; font-size:11px;">${v.cgst ? v.cgstRate.toFixed(1) + '%' : '—'}</td>
-      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-size:11px;">${v.cgst.toFixed(2)}</td>
-      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:center; font-family:monospace; font-size:11px;">${v.sgst ? v.sgstRate.toFixed(1) + '%' : '—'}</td>
-      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-size:11px;">${v.sgst.toFixed(2)}</td>
-      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:center; font-family:monospace; font-size:11px;">${v.igst ? v.igstRate.toFixed(1) + '%' : '—'}</td>
-      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-size:11px;">${v.igst.toFixed(2)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:center; font-family:monospace; font-size:12.5px;">${escHtml(hsn)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-size:12.5px;">${v.taxable.toFixed(2)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:center; font-family:monospace; font-size:12.5px;">${v.cgst ? v.cgstRate.toFixed(1) + '%' : '—'}</td>
+      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-size:12.5px;">${v.cgst.toFixed(2)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:center; font-family:monospace; font-size:12.5px;">${v.sgst ? v.sgstRate.toFixed(1) + '%' : '—'}</td>
+      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-size:12.5px;">${v.sgst.toFixed(2)}</td>
+      <td style="border:1px solid #0f172a; padding:3px 5px; text-align:center; font-family:monospace; font-size:12.5px;">${v.igst ? v.igstRate.toFixed(1) + '%' : '—'}</td>
+      <td style="border:1px solid #0f172a; padding:3px 6px; text-align:right; font-family:monospace; font-size:12.5px;">${v.igst.toFixed(2)}</td>
     </tr>`
       )
       .join('');
 
     const rawLogo = settings.logo ? settings.logo.trim() : '';
-    let logoHtml = `<img class="inv-logo" src="${VCA_LOGO_DATA_URL}" alt="Company Logo" style="max-height:60px; max-width:130px; object-fit:contain; display:block;" />`;
+    let logoHtml = `<img class="inv-logo" src="${VCA_LOGO_DATA_URL}" alt="Company Logo" style="max-height:85px; max-width:150px; object-fit:contain; display:block;" />`;
 
     if (rawLogo && rawLogo !== DEFAULT_LOGO_DATA_URL) {
       if (rawLogo.startsWith('<svg')) {
         logoHtml = rawLogo;
       } else if (rawLogo.startsWith('data:image/') || rawLogo.startsWith('http://') || rawLogo.startsWith('https://') || rawLogo.startsWith('blob:')) {
         const safeSrc = rawLogo.replace(/"/g, '&quot;');
-        logoHtml = `<img class="inv-logo" src="${safeSrc}" alt="Company Logo" style="max-height:60px; max-width:130px; object-fit:contain; display:block;" />`;
+        logoHtml = `<img class="inv-logo" src="${safeSrc}" alt="Company Logo" style="max-height:85px; max-width:150px; object-fit:contain; display:block;" />`;
       }
     }
 
@@ -895,82 +1011,119 @@ export default function App() {
       <div class="inv-box"><div class="inv-box-inner" style="border:1.5px solid #0f172a; padding:12px 15px; background:#fff; color:#0f172a; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; box-sizing:border-box;">
         <div>
           <div class="inv-head" style="border-bottom:1.5px solid #0f172a; padding-bottom:8px; margin-bottom:8px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:bold; margin-bottom:6px;">
-              <span style="text-transform:uppercase; letter-spacing:1px; color:#0f172a; font-size:13.5px; font-weight:900;">${isSale ? (isSalesBill2 ? 'NON-GST INVOICE' : 'TAX INVOICE') : 'PURCHASE BILL'}</span>
-              <span style="border:1.5px solid #0f172a; padding:2px 8px; border-radius:3px; font-family:monospace; background:#f8fafc; font-size:11px; font-weight:bold; color:#0f172a;">${copyTag}</span>
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:bold; margin-bottom:6px;">
+              <span style="text-transform:uppercase; letter-spacing:1px; color:#0f172a; font-size:14.5px; font-weight:900;">${isSale ? (isSalesBill2 ? 'NON-GST INVOICE' : 'TAX INVOICE') : 'PURCHASE BILL'}</span>
+              <span style="border:1.5px solid #0f172a; padding:2px 8px; border-radius:3px; font-family:monospace; background:#f8fafc; font-size:12px; font-weight:bold; color:#0f172a;">${copyTag}</span>
             </div>
             <div class="inv-headrow" style="display:flex; justify-content:space-between; align-items:center;">
-              <div style="width:130px; display:flex; justify-content:flex-start; align-items:center;">
+              <div style="width:140px; display:flex; justify-content:flex-start; align-items:center;">
                 ${logoHtml}
               </div>
               <div class="inv-headtext" style="text-align:center; flex:1; padding:0 10px;">
-                <div class="inv-company" style="font-size:30px; font-weight:900; color:#0f172a; letter-spacing:-0.5px; line-height:1.1; margin:0; text-transform:uppercase;">${escHtml(companyName)}</div>
-                <div style="font-size:12px; color:#334155; font-weight:600; margin-top:2px;">${escHtml(companyAddress)}</div>
-                <div class="inv-gstline" style="font-size:12.5px; font-weight:800; margin-top:2px;">${companyGstin ? 'GSTIN: ' + escHtml(companyGstin) : ''}${companyPhone ? (companyGstin ? ' &nbsp;|&nbsp; ' : '') + 'Ph: ' + escHtml(companyPhone) : ''}</div>
+                <div class="inv-company" style="font-size:38px; font-weight:900; color:#0f172a; letter-spacing:-0.5px; line-height:1.1; margin:0; text-transform:uppercase;">${escHtml(companyName)}</div>
+                <div style="font-size:14px; color:#334155; font-weight:600; margin-top:3px;">${escHtml(companyAddress)}</div>
+                <div class="inv-gstline" style="font-size:14px; font-weight:800; margin-top:2px;">${companyGstin ? 'GSTIN: ' + escHtml(companyGstin) : ''}${companyPhone ? (companyGstin ? ' &nbsp;|&nbsp; ' : '') + 'Ph: ' + escHtml(companyPhone) : ''}</div>
               </div>
-              <div style="width:130px; text-align:right; font-size:12px; font-family:monospace; font-weight:bold;">
-                <div>Inv #: ${escHtml(ref)}</div>
-                <div>Date: ${escHtml(bill.date)}</div>
+              <div style="width:140px;"></div>
+            </div>
+          </div>
+
+          <div class="inv-parties" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:10px; font-size:14px;">
+            <!-- Box 1: DETAILS OF RECEIVER (BILLED TO) -->
+            <div class="inv-party-box" style="border:1.5px solid #0f172a; background:#fff; box-sizing:border-box;">
+              <div class="inv-sub-hd" style="font-weight:900; text-transform:uppercase; color:#0f172a; font-size:13px; letter-spacing:0.5px; padding:5px 10px; border-bottom:1.5px solid #0f172a;">
+                DETAILS OF RECEIVER (BILLED TO)
+              </div>
+              <div class="inv-party-content" style="padding:8px 10px;">
+                <table style="width:100%; border:none; border-collapse:collapse; line-height:1.45; font-size:14.5px;">
+                  <tbody>
+                    <tr><td style="width:85px; font-weight:bold; color:#0f172a; padding:3px 0; border:none;">Name</td><td style="font-weight:bold; color:#0f172a; padding:3px 0; border:none;">: ${escHtml(party)}</td></tr>
+                    <tr><td style="font-weight:bold; color:#0f172a; padding:3px 0; border:none;">Address</td><td style="color:#0f172a; padding:3px 0; border:none;">: ${escHtml(cAddress || '—')}</td></tr>
+                    <tr><td style="font-weight:bold; color:#0f172a; padding:3px 0; border:none;">State</td><td style="color:#0f172a; padding:3px 0; border:none;">: ${escHtml(partyState || 'Tamil Nadu')}</td></tr>
+                    <tr><td style="font-weight:bold; color:#0f172a; padding:3px 0; border:none;">GSTIN</td><td style="font-family:monospace; font-weight:bold; color:#0f172a; padding:3px 0; border:none;">: ${isSalesBill2 || !cGstin ? '-' : escHtml(cGstin)}</td></tr>
+                    <tr><td style="font-weight:bold; color:#0f172a; padding:3px 0; border:none;">Phone</td><td style="color:#0f172a; padding:3px 0; border:none;">: ${escHtml(cPhone || '—')}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Box 2: INVOICE & DISPATCH DETAILS -->
+            <div class="inv-party-box" style="border:1.5px solid #0f172a; background:#fff; box-sizing:border-box;">
+              <div class="inv-sub-hd" style="font-weight:900; text-transform:uppercase; color:#0f172a; font-size:13px; letter-spacing:0.5px; padding:5px 10px; border-bottom:1.5px solid #0f172a;">
+                INVOICE & DISPATCH DETAILS
+              </div>
+              <div class="inv-party-content" style="padding:8px 10px;">
+                <table style="width:100%; border:none; border-collapse:collapse; line-height:1.45; font-size:14.5px;">
+                  <tbody>
+                    <tr><td style="width:125px; font-weight:bold; color:#0f172a; padding:3px 0; border:none;">Invoice No.</td><td style="font-family:monospace; font-weight:bold; color:#0f172a; padding:3px 0; border:none;">: ${escHtml(ref)}</td></tr>
+                    <tr><td style="font-weight:bold; color:#0f172a; padding:3px 0; border:none;">Invoice Date</td><td style="font-family:monospace; color:#0f172a; padding:3px 0; border:none;">: ${escHtml(formatDateDDMMYYYY(bill.date))}</td></tr>
+                    <tr><td style="font-weight:bold; color:#0f172a; padding:3px 0; border:none;">Article</td><td style="color:#0f172a; padding:3px 0; border:none;">: ${escHtml(bill.articleNo || '—')}</td></tr>
+                    <tr><td style="font-weight:bold; color:#0f172a; padding:3px 0; border:none;">Dispatched Via</td><td style="color:#0f172a; padding:3px 0; border:none;">: ${escHtml(bill.dispatchThrough || '—')}</td></tr>
+                    <tr><td style="font-weight:bold; color:#0f172a; padding:3px 0; border:none;">Total Qty</td><td style="font-family:monospace; color:#0f172a; padding:3px 0; border:none;">: ${totalQty} ${bill.items[0]?.unit || 'Pcs'}</td></tr>
+                    <tr><td style="font-weight:bold; color:#0f172a; padding:3px 0; border:none;">Total Weight</td><td style="font-family:monospace; color:#0f172a; padding:3px 0; border:none;">: ${totalWeightKg > 0 ? totalWeightKg.toFixed(2) + ' Kg' : '—'}</td></tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
 
-          <div class="inv-parties" style="display:grid; grid-template-columns:1fr 1fr; border:1.5px solid #0f172a; margin-bottom:8px; font-size:13px; padding:6px 10px; gap:10px;">
-            <div style="padding-right:8px; border-right:1.5px solid #0f172a;">
-              <div class="inv-sub-hd" style="font-weight:900; text-transform:uppercase; margin-bottom:4px; color:#0f172a; font-size:12px; letter-spacing:0.5px;">DETAILS OF RECEIVER (BILLED TO)</div>
-              <table style="width:100%; border:none; border-collapse:collapse; line-height:1.35; font-size:13px;">
-                <tr><td style="width:70px; font-weight:bold; color:#334155; padding:1.5px 0;">Name</td><td style="font-weight:bold; color:#0f172a; padding:1.5px 0;">: ${escHtml(party)}</td></tr>
-                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Address</td><td style="padding:1.5px 0;">: ${escHtml(cAddress || '—')}</td></tr>
-                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">State</td><td style="padding:1.5px 0;">: ${escHtml(partyState || 'Tamil Nadu')}</td></tr>
-                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">GSTIN</td><td style="font-family:monospace; font-weight:bold; padding:1.5px 0;">: ${isSalesBill2 || !cGstin ? '-' : escHtml(cGstin)}</td></tr>
-                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Phone</td><td style="padding:1.5px 0;">: ${escHtml(cPhone || '—')}</td></tr>
-              </table>
-            </div>
-            <div style="padding-left:8px;">
-              <div class="inv-sub-hd" style="font-weight:900; text-transform:uppercase; margin-bottom:4px; color:#0f172a; font-size:12px; letter-spacing:0.5px;">INVOICE & DISPATCH DETAILS</div>
-              <table style="width:100%; border:none; border-collapse:collapse; line-height:1.35; font-size:13px;">
-                <tr><td style="width:110px; font-weight:bold; color:#334155; padding:1.5px 0;">Invoice No.</td><td style="font-family:monospace; font-weight:bold; color:#0f172a; padding:1.5px 0;">: ${escHtml(ref)}</td></tr>
-                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Invoice Date</td><td style="font-family:monospace; padding:1.5px 0;">: ${escHtml(bill.date)}</td></tr>
-                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Article</td><td style="font-weight:bold; color:#0f172a; padding:1.5px 0;">: ${escHtml(bill.articleNo || '—')}</td></tr>
-                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Dispatched Via</td><td style="font-weight:bold; color:#0f172a; padding:1.5px 0;">: ${escHtml(bill.dispatchThrough || '—')}</td></tr>
-                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Total Qty</td><td style="font-family:monospace; font-weight:bold; color:#0f172a; padding:1.5px 0;">: ${totalQty} ${bill.items[0]?.unit || 'Pcs'}</td></tr>
-                <tr><td style="font-weight:bold; color:#334155; padding:1.5px 0;">Total Weight</td><td style="font-family:monospace; font-weight:bold; color:#0f172a; padding:1.5px 0;">: ${totalWeightKg > 0 ? totalWeightKg.toFixed(2) + ' Kg' : '—'}</td></tr>
-              </table>
-            </div>
-          </div>
-
-          <table class="inv-items" style="width:100%; border-collapse:collapse; margin-bottom:8px; border:1.5px solid #0f172a; table-layout:fixed;">
+          <table class="inv-items" style="width:100%; border-collapse:collapse; margin-bottom:10px; border:1.5px solid #0f172a; table-layout:fixed;">
             <thead>
-              <tr style="background:#f1f5f9; font-size:11px; text-transform:uppercase; font-weight:800;">
-                <th style="border:1px solid #0f172a; padding:5px 3px; width:5%;">S.NO</th>
-                <th style="border:1px solid #0f172a; padding:5px 6px; width:33%; text-align:left;">DESCRIPTION OF GOODS</th>
-                <th style="border:1px solid #0f172a; padding:5px 3px; width:10%;">HSN</th>
-                <th style="border:1px solid #0f172a; padding:5px 3px; width:7%;">GST%</th>
-                <th style="border:1px solid #0f172a; padding:5px 4px; width:8%; text-align:right;">QTY</th>
-                <th style="border:1px solid #0f172a; padding:5px 3px; width:7%;">UNIT</th>
-                <th style="border:1px solid #0f172a; padding:5px 4px; width:10%; text-align:right;">RATE</th>
-                <th style="border:1px solid #0f172a; padding:5px 3px; width:7%;">DISC%</th>
-                <th style="border:1px solid #0f172a; padding:5px 6px; width:13%; text-align:right;">TAXABLE VALUE</th>
+              <tr style="background:#f1f5f9; font-size:13px; text-transform:uppercase; font-weight:900;">
+                <th style="border:1px solid #0f172a; padding:6px 4px; width:5%;">S.NO</th>
+                <th style="border:1px solid #0f172a; padding:6px 6px; width:33%; text-align:left;">DESCRIPTION OF GOODS</th>
+                <th style="border:1px solid #0f172a; padding:6px 4px; width:10%;">HSN</th>
+                <th style="border:1px solid #0f172a; padding:6px 4px; width:7%;">GST%</th>
+                <th style="border:1px solid #0f172a; padding:6px 5px; width:8%; text-align:right;">QTY</th>
+                <th style="border:1px solid #0f172a; padding:6px 4px; width:7%;">UNIT</th>
+                <th style="border:1px solid #0f172a; padding:6px 5px; width:10%; text-align:right;">RATE</th>
+                <th style="border:1px solid #0f172a; padding:6px 4px; width:7%;">DISC%</th>
+                <th style="border:1px solid #0f172a; padding:6px 6px; width:13%; text-align:right;">TAXABLE VALUE</th>
               </tr>
             </thead>
-            <tbody style="font-size:12px;">${rows}</tbody>
+            <tbody style="font-size:14px;">${rows}</tbody>
           </table>
 
-          <div class="inv-bottom" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; gap:12px;">
+          <div class="inv-bottom" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; gap:14px;">
             <div style="flex:1;">
-              <div class="inv-words" style="background:#f8fafc; border:1.5px solid #0f172a; padding:6px 10px; font-size:12.5px;">
-                <b style="text-transform:uppercase; font-size:10.5px; color:#475569; display:block;">TOTAL INVOICE VALUE IN WORDS:</b>
-                <span style="font-weight:bold; color:#0f172a;">${amountInWords(roundedGrand)}</span>
+              <!-- Amount in words box -->
+              <div class="inv-words" style="background:#f8fafc; border:1.5px solid #0f172a; padding:8px 12px; font-size:14px;">
+                <b style="text-transform:uppercase; font-size:12px; color:#475569; display:block; margin-bottom:3px;">TOTAL INVOICE VALUE IN WORDS:</b>
+                <span style="font-weight:bold; color:#0f172a; font-size:15px;">${amountInWords(roundedGrand)}</span>
+              </div>
+
+              <!-- Gap between amount in words and bank account payment details -->
+              <div style="height:10px;"></div>
+
+              <!-- Bank Account Payment Details Box with QR Code next to it -->
+              <div style="background:#ffffff; border:1.5px solid #0f172a; padding:8px 12px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                <div style="flex:1; font-size:13.5px; line-height:1.45; color:#0f172a;">
+                  <div style="color:#1d4ed8; font-weight:900; font-size:12.5px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px;">
+                    BANK ACCOUNT PAYMENT DETAILS:
+                  </div>
+                  <div>
+                    <b>Bank Name:</b> ${escHtml(companyBankName)} &nbsp;|&nbsp; 
+                    <b>A/C No:</b> <span style="font-family:monospace; font-weight:bold;">${escHtml(companyBankAccount || '—')}</span><br>
+                    <b>IFSC Code:</b> <span style="font-family:monospace; font-weight:bold;">${escHtml(companyBankIfsc || '—')}</span> &nbsp;|&nbsp; 
+                    <b>Branch:</b> Tamil Nadu
+                  </div>
+                </div>
+                ${qrCodeDataUrl ? `
+                <div style="shrink:0; text-align:center; border:1.5px solid #0f172a; padding:4px 6px; background:#fff; border-radius:4px;">
+                  <img src="${qrCodeDataUrl}" alt="Invoice QR Code" style="width:72px; height:72px; display:block; margin:0 auto;" />
+                  <div style="font-size:8.5px; font-weight:900; font-family:monospace; color:#0f172a; letter-spacing:0.3px; margin-top:2px;">SCAN TO PAY / BILL</div>
+                </div>` : ''}
               </div>
             </div>
-            <div class="inv-totals" style="width:260px;">
-              <table style="width:100%; border:1.5px solid #0f172a; border-collapse:collapse; font-size:12px;">
-                <tr><td style="padding:3.5px 8px; font-weight:bold; border-bottom:1px solid #e2e8f0;">Taxable Amount</td><td style="padding:3.5px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.subtotal.toFixed(2)}</td></tr>
-                ${bill.cgst > 0 ? `<tr><td style="padding:3.5px 8px; border-bottom:1px solid #e2e8f0;">CGST</td><td style="padding:3.5px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.cgst.toFixed(2)}</td></tr>` : ''}
-                ${bill.sgst > 0 ? `<tr><td style="padding:3.5px 8px; border-bottom:1px solid #e2e8f0;">SGST</td><td style="padding:3.5px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.sgst.toFixed(2)}</td></tr>` : ''}
-                ${bill.igst > 0 ? `<tr><td style="padding:3.5px 8px; border-bottom:1px solid #e2e8f0;">IGST</td><td style="padding:3.5px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.igst.toFixed(2)}</td></tr>` : ''}
-                <tr><td style="padding:3.5px 8px; border-bottom:1px solid #e2e8f0;">Round Off</td><td style="padding:3.5px 8px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">${roundOff >= 0 ? '+' : '−'}₹${Math.abs(roundOff).toFixed(2)}</td></tr>
-                <tr style="font-weight:bold; font-size:14px; background:#f8fafc;"><td style="padding:4.5px 8px; font-weight:900; border-top:1.5px solid #0f172a;">Grand Total</td><td style="padding:4.5px 8px; text-align:right; font-weight:900; font-family:monospace; border-top:1.5px solid #0f172a;">₹${roundedGrand.toFixed(2)}</td></tr>
+
+            <div class="inv-totals" style="width:280px;">
+              <table style="width:100%; border:1.5px solid #0f172a; border-collapse:collapse; font-size:13.5px;">
+                <tr><td style="padding:4.5px 9px; font-weight:bold; border-bottom:1px solid #e2e8f0;">Taxable Amount</td><td style="padding:4.5px 9px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.subtotal.toFixed(2)}</td></tr>
+                ${bill.cgst > 0 ? `<tr><td style="padding:4.5px 9px; border-bottom:1px solid #e2e8f0;">CGST</td><td style="padding:4.5px 9px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.cgst.toFixed(2)}</td></tr>` : ''}
+                ${bill.sgst > 0 ? `<tr><td style="padding:4.5px 9px; border-bottom:1px solid #e2e8f0;">SGST</td><td style="padding:4.5px 9px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.sgst.toFixed(2)}</td></tr>` : ''}
+                ${bill.igst > 0 ? `<tr><td style="padding:4.5px 9px; border-bottom:1px solid #e2e8f0;">IGST</td><td style="padding:4.5px 9px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">₹${bill.igst.toFixed(2)}</td></tr>` : ''}
+                <tr><td style="padding:4.5px 9px; border-bottom:1px solid #e2e8f0;">Round Off</td><td style="padding:4.5px 9px; text-align:right; font-family:monospace; border-bottom:1px solid #e2e8f0;">${roundOff >= 0 ? '+' : '−'}₹${Math.abs(roundOff).toFixed(2)}</td></tr>
+                <tr style="font-weight:bold; font-size:16px; background:#f8fafc;"><td style="padding:6px 9px; font-weight:900; border-top:1.5px solid #0f172a;">Grand Total</td><td style="padding:6px 9px; text-align:right; font-weight:900; font-family:monospace; border-top:1.5px solid #0f172a;">₹${roundedGrand.toFixed(2)}</td></tr>
               </table>
             </div>
           </div>
@@ -978,33 +1131,33 @@ export default function App() {
           <div class="inv-taxsummary" style="margin-bottom:8px;">
             ${
               isSalesBill2
-                ? `<div style="border:1.5px solid #0f172a; padding:5px 12px; font-size:11.5px; font-weight:bold; color:#334155; text-align:center; background:#f8fafc; letter-spacing:0.5px;">
+                ? `<div style="border:1.5px solid #0f172a; padding:6px 12px; font-size:12.5px; font-weight:bold; color:#334155; text-align:center; background:#f8fafc; letter-spacing:0.5px;">
                 SALES BILL 2 (NON-GST ESTIMATE) — NO TAX CHARGED
               </div>`
-                : `<table style="width:100%; border-collapse:collapse; border:1.5px solid #0f172a; font-size:11px; text-align:center;">
+                : `<table style="width:100%; border-collapse:collapse; border:1.5px solid #0f172a; font-size:12.5px; text-align:center;">
               <thead>
-                <tr style="background:#f1f5f9; text-transform:uppercase; font-weight:800;">
-                  <th style="border:1px solid #0f172a; padding:3px 5px;">HSN/SAC</th>
-                  <th style="border:1px solid #0f172a; padding:3px 5px; text-align:right;">TAXABLE VALUE</th>
-                  <th style="border:1px solid #0f172a; padding:3px 5px;">CGST RATE</th>
-                  <th style="border:1px solid #0f172a; padding:3px 5px; text-align:right;">CGST AMT</th>
-                  <th style="border:1px solid #0f172a; padding:3px 5px;">SGST RATE</th>
-                  <th style="border:1px solid #0f172a; padding:3px 5px; text-align:right;">SGST AMT</th>
-                  <th style="border:1px solid #0f172a; padding:3px 5px;">IGST RATE</th>
-                  <th style="border:1px solid #0f172a; padding:3px 5px; text-align:right;">IGST AMT</th>
+                <tr style="background:#f1f5f9; text-transform:uppercase; font-weight:900;">
+                  <th style="border:1px solid #0f172a; padding:4px 6px;">HSN/SAC</th>
+                  <th style="border:1px solid #0f172a; padding:4px 6px; text-align:right;">TAXABLE VALUE</th>
+                  <th style="border:1px solid #0f172a; padding:4px 6px;">CGST RATE</th>
+                  <th style="border:1px solid #0f172a; padding:4px 6px; text-align:right;">CGST AMT</th>
+                  <th style="border:1px solid #0f172a; padding:4px 6px;">SGST RATE</th>
+                  <th style="border:1px solid #0f172a; padding:4px 6px; text-align:right;">SGST AMT</th>
+                  <th style="border:1px solid #0f172a; padding:4px 6px;">IGST RATE</th>
+                  <th style="border:1px solid #0f172a; padding:4px 6px; text-align:right;">IGST AMT</th>
                 </tr>
               </thead>
               <tbody>
                 ${hsnRows}
                 <tr style="font-weight:700; background:#f8fafc;">
-                  <td style="border:1px solid #0f172a; padding:3px 5px; text-align:left;">Total Tax</td>
-                  <td style="border:1px solid #0f172a; padding:3px 5px; text-align:right; font-family:monospace;">${bill.subtotal.toFixed(2)}</td>
-                  <td style="border:1px solid #0f172a; padding:3px 5px;"></td>
-                  <td style="border:1px solid #0f172a; padding:3px 5px; text-align:right; font-family:monospace;">${bill.cgst.toFixed(2)}</td>
-                  <td style="border:1px solid #0f172a; padding:3px 5px;"></td>
-                  <td style="border:1px solid #0f172a; padding:3px 5px; text-align:right; font-family:monospace;">${bill.sgst.toFixed(2)}</td>
-                  <td style="border:1px solid #0f172a; padding:3px 5px;"></td>
-                  <td style="border:1px solid #0f172a; padding:3px 5px; text-align:right; font-family:monospace;">${bill.igst.toFixed(2)}</td>
+                  <td style="border:1px solid #0f172a; padding:4px 6px; text-align:left;">Total Tax</td>
+                  <td style="border:1px solid #0f172a; padding:4px 6px; text-align:right; font-family:monospace;">${bill.subtotal.toFixed(2)}</td>
+                  <td style="border:1px solid #0f172a; padding:4px 6px;"></td>
+                  <td style="border:1px solid #0f172a; padding:4px 6px; text-align:right; font-family:monospace;">${bill.cgst.toFixed(2)}</td>
+                  <td style="border:1px solid #0f172a; padding:4px 6px;"></td>
+                  <td style="border:1px solid #0f172a; padding:4px 6px; text-align:right; font-family:monospace;">${bill.sgst.toFixed(2)}</td>
+                  <td style="border:1px solid #0f172a; padding:4px 6px;"></td>
+                  <td style="border:1px solid #0f172a; padding:4px 6px; text-align:right; font-family:monospace;">${bill.igst.toFixed(2)}</td>
                 </tr>
               </tbody>
             </table>`
@@ -1012,22 +1165,13 @@ export default function App() {
           </div>
         </div>
 
-        <div style="display:flex; justify-content:space-between; align-items:flex-end; font-size:12px; margin-top:6px; padding-top:4px;">
-          <div>
-            ${
-              isOriginalCopy
-                ? `<div style="color:#0f172a; font-size:11px; line-height:1.4; border:1px solid #cbd5e1; padding:5px 8px; background:#fafafa;">
-                    <span style="color:#1d4ed8; font-weight:bold; font-size:10.5px; text-transform:uppercase;">Bank Account Payment Info:</span><br>
-                    <b>Bank:</b> ${escHtml(companyBankName)}<br>
-                    <b>A/C No:</b> <span style="font-family:monospace; font-weight:bold;">${escHtml(companyBankAccount || '—')}</span> &nbsp;|&nbsp; <b>IFSC:</b> <span style="font-family:monospace; font-weight:bold;">${escHtml(companyBankIfsc || '—')}</span>
-                   </div>`
-                : `<div style="color:#64748b; font-style:italic; font-size:10.5px;">[ Bank details omitted for transport copy ]</div>`
-            }
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; font-size:13px; margin-top:8px; padding-top:4px;">
+          <div>${isOriginalCopy ? '' : '<div style="color:#64748b; font-style:italic; font-size:11.5px;">[ Transport / Supplier Copy ]</div>'}</div>
           </div>
 
           <div class="inv-sign" style="text-align:right;">
-            <div style="font-weight:bold; color:#0f172a; font-size:12px;">For, ${escHtml(companyName)}</div>
-            <div style="margin-top:22px; border-top:1px solid #0f172a; padding-top:3px; font-weight:bold; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#1e293b;">
+            <div style="font-weight:bold; color:#0f172a; font-size:13px;">For, ${escHtml(companyName)}</div>
+            <div style="margin-top:24px; border-top:1px solid #0f172a; padding-top:3px; font-weight:bold; font-size:12px; text-transform:uppercase; letter-spacing:0.5px; color:#1e293b;">
               AUTHORISED SIGNATURE
             </div>
           </div>
@@ -1300,6 +1444,81 @@ export default function App() {
                 </div>
               )}
 
+              {/* 30-Day Overdue Inward Payment Notification Banner */}
+              {(() => {
+                const overdueInwardBills = purchaseBills.filter((b) => {
+                  if (b.status === 'paid') return false;
+                  if (!b.date) return false;
+                  const billTime = new Date(b.date).getTime();
+                  if (isNaN(billTime)) return false;
+                  const now = new Date().getTime();
+                  const diffDays = Math.floor((now - billTime) / (1000 * 3600 * 24));
+                  return diffDays >= 30;
+                });
+
+                if (overdueInwardBills.length === 0) return null;
+
+                return (
+                  <div className="bg-amber-50 border-l-4 border-amber-600 p-4 rounded-xl text-xs text-amber-950 shadow-xs space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold text-sm text-amber-950 block">
+                            PAYMENT DUE NOTIFICATION: {overdueInwardBills.length} Inward Purchase Bill{overdueInwardBills.length > 1 ? 's' : ''} Over 30 Days Old!
+                          </span>
+                          <p className="mt-0.5 text-amber-800">
+                            Inward yarn/material data recorded over 30 days ago requires payment processing. Review status and mark payments below:
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setActivePage('purchases')}
+                        className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs transition-colors shrink-0 cursor-pointer shadow-2xs"
+                      >
+                        Check All Purchase Bills &rarr;
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+                      {overdueInwardBills.map((b, idx) => {
+                        const daysAgo = Math.floor((new Date().getTime() - new Date(b.date).getTime()) / (1000 * 3600 * 24));
+                        return (
+                          <div key={idx} className="bg-white p-3 rounded-lg border border-amber-200 text-xs shadow-2xs flex flex-col justify-between">
+                            <div>
+                              <div className="flex justify-between items-center mb-1">
+                                <span className="font-mono font-bold text-purple-700">{b.poNo}</span>
+                                <span className="px-2 py-0.5 bg-rose-100 text-rose-800 font-extrabold text-[10px] rounded-full">
+                                  {daysAgo} Days Overdue
+                                </span>
+                              </div>
+                              <div className="font-bold text-slate-900">{b.supplierName}</div>
+                              <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                                Inward Date: {formatDateDDMMYYYY(b.date)} {b.supplierInvNo ? `| Inv: ${b.supplierInvNo}` : ''}
+                              </div>
+                            </div>
+                            <div className="mt-2.5 pt-2 border-t border-amber-100 flex justify-between items-center">
+                              <span className="font-extrabold font-mono text-slate-900">₹{b.grand.toLocaleString('en-IN')}</span>
+                              <button
+                                onClick={async () => {
+                                  const updated = purchaseBills.map((pb) => pb.poNo === b.poNo ? { ...pb, status: 'paid' as const } : pb);
+                                  setPurchaseBills(updated);
+                                  await storeSet('purchaseBills', updated);
+                                  showToast(`Payment recorded for ${b.poNo}!`);
+                                }}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded transition-colors cursor-pointer"
+                              >
+                                Mark Paid
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="dash-grid">
                 <div className="stat">
                   <div className="lbl">Sales Bills</div>
@@ -1387,6 +1606,9 @@ export default function App() {
               onUpdateStatus={handleUpdateOrderStatus}
               customerNames={customers.map((c) => c.name)}
               varietyNames={varieties.map((v) => v.varietyName)}
+              onConvertToBill={handleConvertOrderToSalesBill}
+              salesBills={salesBills}
+              openInvoice={openInvoice}
             />
           )}
 
@@ -1449,6 +1671,24 @@ export default function App() {
                       <span className="font-bold block text-amber-950">Non-GST Billing Mode Active</span>
                       <span>Follows standard bill sequence (<strong>{sbBillNo}</strong>). Stock will <strong>NOT</strong> be deducted from inventory. GSTIN displays as <strong>-</strong>. Total amount will be posted to Customer Ledger.</span>
                     </div>
+                  </div>
+                )}
+
+                {sbOrderNo && (
+                  <div className="mb-4 p-3 bg-sky-50 border border-sky-200 rounded-xl text-xs text-sky-950 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <ShoppingBag className="w-4 h-4 text-sky-700 shrink-0" />
+                      <span>
+                        <strong>Linked Order Note:</strong> This bill will be recorded against Order <strong>{sbOrderNo}</strong>. The remaining pending balance will update automatically upon invoice generation.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSbOrderNo('')}
+                      className="text-xs text-sky-700 hover:text-sky-900 font-bold underline shrink-0 cursor-pointer"
+                    >
+                      Unlink
+                    </button>
                   </div>
                 )}
 
@@ -1668,14 +1908,27 @@ export default function App() {
                             value={item.name}
                             onChange={(e) => {
                               const updated = [...sbItems];
-                              updated[idx].name = e.target.value;
+                              const selectedVal = e.target.value;
+                              updated[idx].name = selectedVal;
+                              // Auto-fill rate from variety if available
+                              const matchedVariety = varieties.find((v) => v.varietyName.toLowerCase() === selectedVal.toLowerCase().trim());
+                              if (matchedVariety && (!updated[idx].rate || updated[idx].rate === 0)) {
+                                if (matchedVariety.targetGsm) {
+                                  // Auto set default rate if available
+                                }
+                              }
                               setSbItems(updated);
                             }}
-                            placeholder="Select finished towel"
+                            placeholder="Select item / variety"
                           />
                           <datalist id="finishedGoodsList">
-                            {inventory.filter((i) => i.type === 'finished').map((i, k) => (
-                              <option key={k} value={i.name} />
+                            {Array.from(
+                              new Set([
+                                ...inventory.map((i) => i.name),
+                                ...varieties.map((v) => v.varietyName)
+                              ])
+                            ).map((itemName, k) => (
+                              <option key={k} value={itemName} />
                             ))}
                           </datalist>
                         </td>
@@ -1707,6 +1960,7 @@ export default function App() {
                           <input
                             type="text"
                             inputMode="decimal"
+                            step="0.01"
                             value={item.rate === 0 ? '' : item.rate}
                             onChange={(e) => {
                               const updated = [...sbItems];
@@ -1714,6 +1968,7 @@ export default function App() {
                               updated[idx].rate = val === '' ? 0 : (parseFloat(val) || 0);
                               setSbItems(updated);
                             }}
+                            placeholder="0.00"
                           />
                         </td>
                         <td>
@@ -1803,6 +2058,7 @@ export default function App() {
                     const newBill: SalesBill = {
                       id: 'sb_' + Date.now(),
                       billNo: sbBillNo,
+                      orderNo: (sbOrderNo || sbArticleNo).trim(),
                       date: sbDate,
                       billType: sbBillType,
                       articleNo: sbArticleNo.trim(),
@@ -1837,6 +2093,42 @@ export default function App() {
                     const updatedBills = [newBill, ...salesBills];
                     setSalesBills(updatedBills);
                     await storeSet('salesBills', updatedBills);
+
+                    // Auto update Production Order status if this invoice is linked to an order
+                    const linkedOrderNo = (sbOrderNo || sbArticleNo).trim().toLowerCase();
+                    if (linkedOrderNo) {
+                      const matchedOrder = productionOrders.find(
+                        (o) => o.orderNo.toLowerCase().trim() === linkedOrderNo
+                      );
+                      if (matchedOrder) {
+                        const totalOrderedQty = matchedOrder.items.reduce((s, i) => s + (Number(i.targetQty) || 0), 0);
+                        let totalBilledAllBills = 0;
+                        updatedBills.forEach((b) => {
+                          const bOrd = (b.orderNo || '').toLowerCase().trim();
+                          const bArt = (b.articleNo || '').toLowerCase().trim();
+                          if (bOrd === linkedOrderNo || bArt === linkedOrderNo || bArt.includes(linkedOrderNo)) {
+                            b.items.forEach((bi) => {
+                              totalBilledAllBills += Number(bi.qty) || 0;
+                            });
+                          }
+                        });
+
+                        const newStatus =
+                          totalBilledAllBills >= totalOrderedQty
+                            ? 'completed'
+                            : totalBilledAllBills > 0
+                            ? 'partially_billed'
+                            : matchedOrder.status;
+
+                        if (newStatus !== matchedOrder.status) {
+                          const updatedOrders = productionOrders.map((o) =>
+                            o.id === matchedOrder.id ? { ...o, status: newStatus as any } : o
+                          );
+                          setProductionOrders(updatedOrders);
+                          await storeSet('productionOrders', updatedOrders);
+                        }
+                      }
+                    }
 
                     // Reduce finished goods inventory ONLY if NOT Sales Bill 2
                     if (!isSalesBill2) {
@@ -1874,6 +2166,7 @@ export default function App() {
                     setSbCustPincode('');
                     setSbDispatchThrough('');
                     setSbArticleNo('');
+                    setSbOrderNo('');
                     setSbItems([{ name: '', hsn: '6304', qty: 0, rate: 0, taxRate: 5, discPct: 0 }]);
                     const activeComp = companies.find((c) => c.id === sbCompanyId) || companies[0];
                     setSbBillNo(generateNextBillNoForCompany(activeComp?.id || '', activeComp?.prefix || 'VC', updatedBills));
@@ -2023,6 +2316,9 @@ export default function App() {
               setEmployees={setEmployees}
               salaryAdvances={salaryAdvances}
               setSalaryAdvances={setSalaryAdvances}
+              productionLogs={productionLogs}
+              varieties={varieties}
+              settings={settings}
               showToast={showToast}
             />
           )}
@@ -2499,67 +2795,71 @@ export default function App() {
                       <span className="text-xs font-black text-slate-900 uppercase tracking-widest">
                         {previewBill.billType === 'sales_bill_2' ? 'NON-GST INVOICE' : (previewBill.billType === 'purchase' ? 'PURCHASE BILL' : 'TAX INVOICE')}
                       </span>
-                      <span className="text-[11px] font-mono font-bold bg-slate-100 border-1.5 border-slate-900 px-2.5 py-1 rounded text-slate-900">
+                      <span className="text-xs font-mono font-bold bg-slate-100 border-1.5 border-slate-900 px-3 py-1 rounded text-slate-900">
                         {billCopyType === 'transport' ? 'DUPLICATE FOR TRANSPORTER' : billCopyType === 'supplier' ? 'TRIPLICATE FOR SUPPLIER' : (previewBill.billType === 'sales_bill_2' ? 'NON-GST INVOICE — ORIGINAL' : 'ORIGINAL FOR RECIPIENT')}
                       </span>
                     </div>
 
                     <div className="flex justify-between items-center gap-4">
-                      <div className="w-28 shrink-0 flex items-center justify-start">
+                      <div className="w-36 shrink-0 flex items-center justify-start">
                         <img 
                           src={settings.logo || VCA_LOGO_DATA_URL} 
                           alt="Company Logo" 
-                          className="max-h-16 max-w-28 object-contain block" 
+                          className="max-h-20 max-w-36 object-contain block" 
                         />
                       </div>
                       <div className="text-center flex-1 px-2">
-                        <h2 className="text-2xl sm:text-[28px] font-black text-slate-900 m-0 leading-tight uppercase tracking-tight">{previewBill.companyName || settings.name || 'VCA Fabrics'}</h2>
+                        <h2 className="text-3xl sm:text-4xl font-black text-slate-900 m-0 leading-tight uppercase tracking-tight">{previewBill.companyName || settings.name || 'VCA Fabrics'}</h2>
                         {settings.tagline && <p className="text-xs text-slate-600 italic mt-0.5">{settings.tagline}</p>}
-                        <p className="text-xs text-slate-700 font-medium mt-1">{previewBill.companyAddress || settings.address}</p>
-                        <p className="text-xs font-bold text-slate-900 mt-0.5">
+                        <p className="text-sm text-slate-700 font-semibold mt-1">{previewBill.companyAddress || settings.address}</p>
+                        <p className="text-sm font-black text-slate-900 mt-0.5">
                           {previewBill.companyGstin ? `GSTIN: ${previewBill.companyGstin}` : 'Non-GST'} {previewBill.companyPhone ? `| Ph: ${previewBill.companyPhone}` : (settings.phone ? `| Ph: ${settings.phone}` : '')}
                         </p>
                       </div>
-                      <div className="w-28 text-right font-mono text-xs font-bold text-slate-900">
-                        <div>Inv #: {previewBill.billNo}</div>
-                        <div>Date: {previewBill.date}</div>
-                      </div>
+                      <div className="w-36 shrink-0"></div>
                     </div>
                   </div>
 
-                  {/* Customer / Dispatch Details */}
+                  {/* Customer / Dispatch Details - Two Neat Bordered Boxes Without Internal Row Lines */}
                   {(() => {
                     const { totalQty: modalTotalQty, totalWeightKg: modalTotalWeight } = calculateBillWeightAndQty(previewBill.items);
                     return (
-                      <div className="border-1.5 border-slate-900 grid grid-cols-1 sm:grid-cols-2 text-xs">
-                        <div className="p-2.5 sm:border-r-1.5 border-slate-900">
-                          <span className="text-xs uppercase font-black text-slate-900 block mb-1.5 tracking-wider">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                        {/* Left Box: DETAILS OF RECEIVER (BILLED TO) */}
+                        <div className="border-1.5 border-slate-900 bg-white">
+                          <div className="font-black text-slate-900 text-xs uppercase tracking-wider px-3 py-1.5 border-b-1.5 border-slate-900 bg-slate-50">
                             DETAILS OF RECEIVER (BILLED TO)
-                          </span>
-                          <table className="w-full text-[13px]">
-                            <tbody>
-                              <tr><td className="w-16 font-bold text-slate-600 py-0.5">Name</td><td className="font-bold text-slate-900 py-0.5">: {previewBill.customerName}</td></tr>
-                              <tr><td className="font-bold text-slate-600 py-0.5">Address</td><td className="text-slate-800 py-0.5">: {previewBill.customerAddress || '—'} {previewBill.customerPincode ? `(${previewBill.customerPincode})` : ''}</td></tr>
-                              <tr><td className="font-bold text-slate-600 py-0.5">State</td><td className="text-slate-800 py-0.5">: {previewBill.customerState}</td></tr>
-                              <tr><td className="font-bold text-slate-600 py-0.5">GSTIN</td><td className="font-mono font-bold text-slate-900 py-0.5">: {previewBill.billType === 'sales_bill_2' || !previewBill.customerGstin ? '-' : previewBill.customerGstin}</td></tr>
-                              <tr><td className="font-bold text-slate-600 py-0.5">Phone</td><td className="text-slate-800 py-0.5">: {previewBill.customerPhone || '—'}</td></tr>
-                            </tbody>
-                          </table>
+                          </div>
+                          <div className="p-3">
+                            <table className="w-full text-[14.5px] border-collapse">
+                              <tbody>
+                                <tr><td className="w-24 font-bold text-slate-900 py-1 border-0">Name</td><td className="font-bold text-slate-900 py-1 border-0">: {previewBill.customerName}</td></tr>
+                                <tr><td className="font-bold text-slate-900 py-1 border-0">Address</td><td className="text-slate-800 py-1 border-0">: {previewBill.customerAddress || '—'} {previewBill.customerPincode ? `(${previewBill.customerPincode})` : ''}</td></tr>
+                                <tr><td className="font-bold text-slate-900 py-1 border-0">State</td><td className="text-slate-800 py-1 border-0">: {previewBill.customerState}</td></tr>
+                                <tr><td className="font-bold text-slate-900 py-1 border-0">GSTIN</td><td className="font-mono font-bold text-slate-900 py-1 border-0">: {previewBill.billType === 'sales_bill_2' || !previewBill.customerGstin ? '-' : previewBill.customerGstin}</td></tr>
+                                <tr><td className="font-bold text-slate-900 py-1 border-0">Phone</td><td className="text-slate-800 py-1 border-0">: {previewBill.customerPhone || '—'}</td></tr>
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
-                        <div className="p-2.5 border-t sm:border-t-0 border-slate-900">
-                          <span className="text-xs uppercase font-black text-slate-900 block mb-1.5 tracking-wider">
+
+                        {/* Right Box: INVOICE & DISPATCH DETAILS */}
+                        <div className="border-1.5 border-slate-900 bg-white">
+                          <div className="font-black text-slate-900 text-xs uppercase tracking-wider px-3 py-1.5 border-b-1.5 border-slate-900 bg-slate-50">
                             INVOICE & DISPATCH DETAILS
-                          </span>
-                          <table className="w-full text-[13px]">
-                            <tbody>
-                              <tr><td className="w-28 font-bold text-slate-600 py-0.5">Invoice No.</td><td className="font-mono font-bold text-slate-900 py-0.5">: {previewBill.billNo}</td></tr>
-                              <tr><td className="font-bold text-slate-600 py-0.5">Invoice Date</td><td className="font-mono text-slate-800 py-0.5">: {previewBill.date}</td></tr>
-                              <tr><td className="font-bold text-slate-600 py-0.5">Article</td><td className="font-bold text-slate-900 py-0.5">: {previewBill.articleNo || '—'}</td></tr>
-                              <tr><td className="font-bold text-slate-600 py-0.5">Dispatched Via</td><td className="font-bold text-slate-900 py-0.5">: {previewBill.dispatchThrough || '—'}</td></tr>
-                              <tr><td className="font-bold text-slate-600 py-0.5">Total Qty</td><td className="font-mono font-bold text-slate-900 py-0.5">: {modalTotalQty} {previewBill.items[0]?.unit || 'Pcs'}</td></tr>
-                              <tr><td className="font-bold text-slate-600 py-0.5">Total Weight</td><td className="font-mono font-bold text-slate-900 py-0.5">: {modalTotalWeight > 0 ? modalTotalWeight.toFixed(2) + ' Kg' : '—'}</td></tr>
-                            </tbody>
-                          </table>
+                          </div>
+                          <div className="p-3">
+                            <table className="w-full text-[14.5px] border-collapse">
+                              <tbody>
+                                <tr><td className="w-36 font-bold text-slate-900 py-1 border-0">Invoice No.</td><td className="font-mono font-bold text-slate-900 py-1 border-0">: {previewBill.billNo}</td></tr>
+                                <tr><td className="font-bold text-slate-900 py-1 border-0">Invoice Date</td><td className="font-mono text-slate-800 py-1 border-0">: {formatDateDDMMYYYY(previewBill.date)}</td></tr>
+                                <tr><td className="font-bold text-slate-900 py-1 border-0">Article</td><td className="text-slate-800 py-1 border-0">: {previewBill.articleNo || '—'}</td></tr>
+                                <tr><td className="font-bold text-slate-900 py-1 border-0">Dispatched Via</td><td className="text-slate-800 py-1 border-0">: {previewBill.dispatchThrough || '—'}</td></tr>
+                                <tr><td className="font-bold text-slate-900 py-1 border-0">Total Qty</td><td className="font-mono font-bold text-slate-900 py-1 border-0">: {modalTotalQty} {previewBill.items[0]?.unit || 'Pcs'}</td></tr>
+                                <tr><td className="font-bold text-slate-900 py-1 border-0">Total Weight</td><td className="font-mono font-bold text-slate-900 py-1 border-0">: {modalTotalWeight > 0 ? modalTotalWeight.toFixed(2) + ' Kg' : '—'}</td></tr>
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       </div>
                     );
@@ -2567,38 +2867,38 @@ export default function App() {
 
                   {/* Items Table with Item Lines */}
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse border-1.5 border-slate-900 text-xs">
+                    <table className="w-full text-left border-collapse border-1.5 border-slate-900 text-sm">
                       <thead>
-                        <tr className="bg-slate-100 text-slate-900 font-extrabold uppercase text-[11px] border-b-1.5 border-slate-900">
-                          <th className="p-1.5 border-r border-slate-900 w-8 text-center">#</th>
-                          <th className="p-1.5 border-r border-slate-900">DESCRIPTION OF GOODS</th>
-                          <th className="p-1.5 border-r border-slate-900 text-center w-16">HSN</th>
-                          <th className="p-1.5 border-r border-slate-900 text-center w-14">GST%</th>
-                          <th className="p-1.5 border-r border-slate-900 text-right w-16">QTY</th>
-                          <th className="p-1.5 border-r border-slate-900 text-center w-12">UNIT</th>
-                          <th className="p-1.5 border-r border-slate-900 text-right w-20">RATE (₹)</th>
-                          <th className="p-1.5 border-r border-slate-900 text-center w-14">DISC%</th>
-                          <th className="p-1.5 text-right w-28">TAXABLE VALUE</th>
+                        <tr className="bg-slate-100 text-slate-900 font-black uppercase text-xs border-b-1.5 border-slate-900">
+                          <th className="p-2 border-r border-slate-900 w-8 text-center">#</th>
+                          <th className="p-2 border-r border-slate-900">DESCRIPTION OF GOODS</th>
+                          <th className="p-2 border-r border-slate-900 text-center w-18">HSN</th>
+                          <th className="p-2 border-r border-slate-900 text-center w-16">GST%</th>
+                          <th className="p-2 border-r border-slate-900 text-right w-18">QTY</th>
+                          <th className="p-2 border-r border-slate-900 text-center w-14">UNIT</th>
+                          <th className="p-2 border-r border-slate-900 text-right w-22">RATE (₹)</th>
+                          <th className="p-2 border-r border-slate-900 text-center w-16">DISC%</th>
+                          <th className="p-2 text-right w-32">TAXABLE VALUE</th>
                         </tr>
                       </thead>
-                      <tbody className="text-[12.5px]">
+                      <tbody className="text-[14px]">
                         {previewBill.items.slice(0, 15).map((it, idx) => (
                           <tr key={idx} className="border-b border-slate-900">
-                            <td className="p-1.5 border-r border-slate-900 font-mono text-center text-slate-600">{idx + 1}</td>
-                            <td className="p-1.5 border-r border-slate-900 font-bold text-slate-900">{it.name}</td>
-                            <td className="p-1.5 border-r border-slate-900 font-mono text-center text-slate-700">{it.hsn || '6304'}</td>
-                            <td className="p-1.5 border-r border-slate-900 font-mono text-center">{it.taxRate}%</td>
-                            <td className="p-1.5 border-r border-slate-900 text-right font-mono font-bold text-slate-900">{it.qty}</td>
-                            <td className="p-1.5 border-r border-slate-900 text-center">{it.unit || 'Pcs'}</td>
-                            <td className="p-1.5 border-r border-slate-900 text-right font-mono">₹{it.rate.toFixed(2)}</td>
-                            <td className="p-1.5 border-r border-slate-900 text-center font-mono">{it.discPct ? `${it.discPct}%` : '—'}</td>
-                            <td className="p-1.5 text-right font-mono font-bold text-slate-900">₹{it.taxable.toFixed(2)}</td>
+                            <td className="p-2 border-r border-slate-900 font-mono text-center text-slate-600">{idx + 1}</td>
+                            <td className="p-2 border-r border-slate-900 font-bold text-slate-900">{it.name}</td>
+                            <td className="p-2 border-r border-slate-900 font-mono text-center text-slate-700">{it.hsn || '6304'}</td>
+                            <td className="p-2 border-r border-slate-900 font-mono text-center">{it.taxRate}%</td>
+                            <td className="p-2 border-r border-slate-900 text-right font-mono font-bold text-slate-900">{it.qty}</td>
+                            <td className="p-2 border-r border-slate-900 text-center">{it.unit || 'Pcs'}</td>
+                            <td className="p-2 border-r border-slate-900 text-right font-mono">₹{it.rate.toFixed(2)}</td>
+                            <td className="p-2 border-r border-slate-900 text-center font-mono">{it.discPct ? `${it.discPct}%` : '—'}</td>
+                            <td className="p-2 text-right font-mono font-bold text-slate-900">₹{it.taxable.toFixed(2)}</td>
                           </tr>
                         ))}
                         {/* Blank Space Filler Row if less than 8 items */}
                         {previewBill.items.length < 8 && (
                           <tr>
-                            <td style={{ height: `${Math.max(25, 140 - previewBill.items.length * 20)}px` }} className="border-r border-slate-900"></td>
+                            <td style={{ height: `${Math.max(25, 130 - previewBill.items.length * 18)}px` }} className="border-r border-slate-900"></td>
                             <td className="border-r border-slate-900"></td>
                             <td className="border-r border-slate-900"></td>
                             <td className="border-r border-slate-900"></td>
@@ -2615,35 +2915,61 @@ export default function App() {
 
                   {/* Totals Summary */}
                   <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pt-2">
-                    <div className="flex-1 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Amount in Words</span>
-                      <p className="font-semibold text-slate-800 text-xs">{amountInWords(Math.round(previewBill.grand))}</p>
+                    <div className="flex-1 space-y-3">
+                      {/* Amount in words card */}
+                      <div className="bg-slate-50 p-3.5 rounded-lg border-1.5 border-slate-900">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">TOTAL INVOICE VALUE IN WORDS</span>
+                        <p className="font-black text-slate-900 text-[15px] leading-snug">{amountInWords(Math.round(previewBill.grand))}</p>
+                      </div>
+
+                      {/* Bank account payment details with QR Code placed next to it */}
+                      <div className="bg-white p-3.5 rounded-lg border-1.5 border-slate-900 flex justify-between items-center gap-3">
+                        <div className="text-[13.5px] text-slate-800 leading-relaxed flex-1">
+                          <span className="text-blue-700 font-black uppercase text-xs tracking-wider block mb-1">Bank Account Payment Details:</span>
+                          <div>
+                            <b>Bank:</b> {previewBill.companyBankName || settings.bankName || 'UNION BANK OF INDIA'} &nbsp;|&nbsp; 
+                            <b>A/C No:</b> <span className="font-mono font-bold text-slate-900">{previewBill.companyBankAccount || settings.bankAccount || '—'}</span><br />
+                            <b>IFSC Code:</b> <span className="font-mono font-bold text-slate-900">{previewBill.companyBankIfsc || settings.bankIfsc || '—'}</span> &nbsp;|&nbsp; 
+                            <b>Branch:</b> Tamil Nadu
+                          </div>
+                        </div>
+                        {previewQrCode && (
+                          <div className="shrink-0 text-center border-1.5 border-slate-900 p-1.5 bg-white rounded shadow-2xs">
+                            <img src={previewQrCode} alt="Invoice QR" className="w-16 h-16 block mx-auto" />
+                            <div className="text-[8px] font-black font-mono text-slate-900 tracking-tight mt-0.5">SCAN TO PAY</div>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="w-full sm:w-72 bg-slate-50 p-3.5 rounded-lg border border-slate-200 space-y-1.5 font-mono text-xs">
-                      <div className="flex justify-between text-slate-600">
-                        <span>Subtotal:</span>
-                        <span>₹{previewBill.subtotal.toFixed(2)}</span>
+                    <div className="w-full sm:w-80 bg-slate-50 p-4 rounded-lg border-1.5 border-slate-900 space-y-2 font-mono text-[13.5px]">
+                      <div className="flex justify-between text-slate-700">
+                        <span>Taxable Amount:</span>
+                        <span className="font-bold">₹{previewBill.subtotal.toFixed(2)}</span>
                       </div>
                       {previewBill.cgst > 0 && (
-                        <div className="flex justify-between text-slate-600">
+                        <div className="flex justify-between text-slate-700">
                           <span>CGST:</span>
                           <span>₹{previewBill.cgst.toFixed(2)}</span>
                         </div>
                       )}
                       {previewBill.sgst > 0 && (
-                        <div className="flex justify-between text-slate-600">
+                        <div className="flex justify-between text-slate-700">
                           <span>SGST:</span>
                           <span>₹{previewBill.sgst.toFixed(2)}</span>
                         </div>
                       )}
                       {previewBill.igst > 0 && (
-                        <div className="flex justify-between text-slate-600">
+                        <div className="flex justify-between text-slate-700">
                           <span>IGST:</span>
                           <span>₹{previewBill.igst.toFixed(2)}</span>
                         </div>
                       )}
-                      <div className="flex justify-between text-slate-900 font-extrabold text-sm pt-2 border-t border-slate-300">
+                      <div className="flex justify-between text-slate-700">
+                        <span>Round Off:</span>
+                        <span>{(Math.round(previewBill.grand) - previewBill.grand) >= 0 ? '+' : '−'}₹{Math.abs(Math.round(previewBill.grand) - previewBill.grand).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-900 font-black text-lg pt-2.5 border-t-1.5 border-slate-900">
                         <span>Grand Total:</span>
                         <span className="text-indigo-700">₹{Math.round(previewBill.grand).toFixed(2)}</span>
                       </div>
@@ -3055,7 +3381,7 @@ export default function App() {
                 />
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-200">
+              <div className="flex justify-end gap-2.5 pt-3 pb-1 border-t border-slate-200 bg-white sticky bottom-0 z-20 mt-3 -mb-1">
                 <button
                   type="button"
                   onClick={() => setShowAddCustModal(false)}
@@ -3109,8 +3435,8 @@ export default function App() {
       {/* SUBSIDIARY COMPANY ADD / EDIT MODAL */}
       {showCompanyModal && editCompanyData && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-3 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden flex flex-col my-auto animate-in fade-in zoom-in-95 duration-150">
-            <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between border-b border-slate-800">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col my-auto animate-in fade-in zoom-in-95 duration-150">
+            <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between border-b border-slate-800 shrink-0 sticky top-0 z-20">
               <div className="flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-indigo-400" />
                 <h3 className="font-bold text-base text-white m-0">
@@ -3128,7 +3454,7 @@ export default function App() {
               </button>
             </div>
 
-            <div className="p-5 space-y-3.5 text-xs">
+            <div className="p-5 space-y-3.5 text-xs overflow-y-auto flex-1">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="sm:col-span-1">
                   <label className="block font-bold text-slate-800 mb-1">Company Name *</label>
@@ -3235,7 +3561,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+              <div className="flex items-center justify-end gap-2 pt-3 pb-1 border-t border-slate-200 bg-white sticky bottom-0 z-20 mt-3 -mb-1">
                 <button
                   type="button"
                   onClick={() => {

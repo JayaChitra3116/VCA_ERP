@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Supplier } from '../types';
 import { storeSet, deleteFromRelationalTable } from '../lib/storage';
-import { Truck, Plus, Save, Search, X, Trash2 } from 'lucide-react';
+import { Truck, Plus, Save, Search, X, Trash2, Edit } from 'lucide-react';
 
 interface SuppliersTabProps {
   suppliers: Supplier[];
@@ -16,6 +16,8 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+
   const [form, setForm] = useState<Supplier>({
     name: '',
     phone: '',
@@ -24,22 +26,76 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
     gstin: ''
   });
 
+  const handleOpenAddModal = () => {
+    setEditingSupplier(null);
+    setForm({
+      name: '',
+      phone: '',
+      place: '',
+      state: 'Tamil Nadu',
+      gstin: ''
+    });
+    setShowAddModal(true);
+  };
+
+  const handleOpenEdit = (sup: Supplier) => {
+    setEditingSupplier(sup);
+    setForm({
+      id: sup.id,
+      name: sup.name,
+      phone: sup.phone || '',
+      place: sup.place || '',
+      state: sup.state || 'Tamil Nadu',
+      gstin: sup.gstin || ''
+    });
+    setShowAddModal(true);
+  };
+
   const handleSave = async () => {
     if (!form.name.trim()) {
       showToast('Please enter supplier name');
       return;
     }
 
-    const newSup: Supplier = {
-      ...form,
-      name: form.name.trim()
-    };
+    if (editingSupplier) {
+      const updated = suppliers.map((s) => {
+        if ((s.id && editingSupplier.id && s.id === editingSupplier.id) || s.name.toLowerCase().trim() === editingSupplier.name.toLowerCase().trim()) {
+          return {
+            ...s,
+            ...form,
+            name: form.name.trim()
+          };
+        }
+        return s;
+      });
 
-    const updated = [newSup, ...suppliers];
-    setSuppliers(updated);
-    await storeSet('suppliers', updated);
+      const exists = suppliers.some((s) => (s.id && editingSupplier.id && s.id === editingSupplier.id) || s.name.toLowerCase().trim() === editingSupplier.name.toLowerCase().trim());
+      if (!exists) {
+        updated.unshift({
+          ...form,
+          id: editingSupplier.id || crypto.randomUUID(),
+          name: form.name.trim()
+        });
+      }
 
-    showToast(`Supplier "${newSup.name}" registered!`);
+      setSuppliers(updated);
+      await storeSet('suppliers', updated);
+      showToast(`Supplier "${form.name.trim()}" updated successfully!`);
+      setEditingSupplier(null);
+    } else {
+      const newSup: Supplier = {
+        ...form,
+        id: crypto.randomUUID(),
+        name: form.name.trim()
+      };
+
+      const updated = [newSup, ...suppliers];
+      setSuppliers(updated);
+      await storeSet('suppliers', updated);
+
+      showToast(`Supplier "${newSup.name}" registered!`);
+    }
+
     setShowAddModal(false);
     setForm({
       name: '',
@@ -81,7 +137,7 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
         </div>
 
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={handleOpenAddModal}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-2 transition-colors cursor-pointer"
         >
           <Plus className="w-4 h-4" />
@@ -133,13 +189,23 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
                     <td className="p-2.5 font-semibold text-slate-700">{s.state || 'Tamil Nadu'}</td>
                     <td className="p-2.5 font-mono text-slate-700 font-semibold">{s.gstin || 'Unregistered'}</td>
                     <td className="p-2.5 text-center">
-                      <button
-                        onClick={() => handleDeleteSupplier(s)}
-                        className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg border border-rose-200 transition-colors cursor-pointer"
-                        title="Delete Supplier"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => handleOpenEdit(s)}
+                          className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 transition-colors cursor-pointer"
+                          title="Edit Supplier Details"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          onClick={() => handleDeleteSupplier(s)}
+                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg border border-rose-200 transition-colors cursor-pointer"
+                          title="Delete Supplier"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -154,7 +220,7 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col my-auto">
             {/* Sticky Header */}
             <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between border-b border-slate-800 shrink-0 sticky top-0 z-20">
-              <h3 className="text-sm font-bold m-0 text-white">Register New Supplier</h3>
+              <h3 className="text-sm font-bold m-0 text-white">{editingSupplier ? 'Edit Supplier Details' : 'Register New Supplier'}</h3>
               <button
                 type="button"
                 onClick={() => setShowAddModal(false)}
@@ -224,18 +290,18 @@ export const SuppliersTab: React.FC<SuppliersTabProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+              <div className="flex justify-end gap-2 pt-3 pb-1 border-t border-slate-200 bg-white sticky bottom-0 z-20 mt-3 -mb-1">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 font-bold"
+                  className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 font-bold hover:bg-slate-200 transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleSave}
-                  className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold flex items-center gap-1.5"
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
                 >
                   <Save className="w-4 h-4" />
                   <span>Save Supplier</span>

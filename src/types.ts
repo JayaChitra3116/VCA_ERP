@@ -75,6 +75,7 @@ export interface BillItem {
 export interface SalesBill {
   id?: string;
   billNo: string;
+  orderNo?: string;
   date: string;
   billType?: 'tax_invoice' | 'sales_bill_2';
   articleNo?: string;
@@ -149,7 +150,7 @@ export interface ProductionOrder {
   orderDate: string;
   deliveryDueDate: string;
   items: OrderItem[];
-  status: 'pending' | 'in_production' | 'completed' | 'cancelled';
+  status: 'pending' | 'partially_billed' | 'in_production' | 'completed' | 'cancelled';
   notes?: string;
   createdAt?: string;
 }
@@ -216,12 +217,21 @@ export interface RoutineTaskReminder {
   notes?: string;
 }
 
+export interface LoomRateSetting {
+  loomNo: string;
+  varietyName: string;
+  rate: number;
+}
+
 export interface Employee {
   id: string;
   name: string;
   role: string;
   machine?: string;
   salary: number;
+  phone?: string;
+  loomCount?: number;
+  loomRates?: LoomRateSetting[];
 }
 
 export interface ProductionLog {
@@ -233,11 +243,14 @@ export interface ProductionLog {
   qty: number;
   unit: string;
   notes: string;
+  waste?: number;
 }
 
 export interface SalaryAdvance {
   id: string;
   employeeId: string;
+  employeeName?: string;
   amount: number;
   date: string;
+  notes?: string;
 }

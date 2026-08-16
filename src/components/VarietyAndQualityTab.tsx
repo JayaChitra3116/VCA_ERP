@@ -34,13 +34,13 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
   const [varietyName, setVarietyName] = useState('');
   const [category, setCategory] = useState('Bath Towel');
   const [standardWeightGsm, setStandardWeightGsm] = useState(500);
-  const [targetLengthCm, setTargetLengthCm] = useState(140);
-  const [targetWidthCm, setTargetWidthCm] = useState(70);
+  const [targetLengthCm, setTargetLengthCm] = useState(55);
+  const [targetWidthCm, setTargetWidthCm] = useState(28);
   const [allowedSizingTolerancePct, setAllowedSizingTolerancePct] = useState(1.5);
   const [allowedGsmTolerancePct, setAllowedGsmTolerancePct] = useState(2.0);
   const [warpYarnSpec, setWarpYarnSpec] = useState('2/20s Cotton Warp');
   const [weftYarnSpec, setWeftYarnSpec] = useState('16s Auto Weft');
-  const [pileYarnSpec, setPileYarnSpec] = useState('2/20s Combed Terry Pile');
+  const [pileYarnSpec, setPileYarnSpec] = useState('2/20s Combed Terry Pick');
   const [machines, setMachines] = useState<VarietyAssignedMachine[]>([
     { machineNo: 'Machine 1', operatorName: operatorNames[0] || 'Ramesh Kumar', allocatedQty: 1000, completedQty: 0, status: 'running' },
     { machineNo: 'Machine 2', operatorName: operatorNames[1] || 'Suresh V', allocatedQty: 1000, completedQty: 0, status: 'running' },
@@ -51,8 +51,8 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
   const [auditMachineNo, setAuditMachineNo] = useState('Machine 2');
   const [auditVarietyName, setAuditVarietyName] = useState(varieties[0]?.varietyName || 'Royal Bath Towel 500GSM');
   const [auditOperatorName, setAuditOperatorName] = useState(operatorNames[1] || 'Suresh V');
-  const [actualLengthCm, setActualLengthCm] = useState(136.5);
-  const [actualWidthCm, setActualWidthCm] = useState(68.2);
+  const [actualLengthCm, setActualLengthCm] = useState(53.5);
+  const [actualWidthCm, setActualWidthCm] = useState(26.8);
   const [actualWeightGsm, setActualWeightGsm] = useState(475);
   const [borderScore, setBorderScore] = useState(3);
   const [selvedgeCondition, setSelvedgeCondition] = useState<'pass' | 'defect'>('defect');
@@ -102,8 +102,8 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
   const handleSaveAudit = (e: React.FormEvent) => {
     e.preventDefault();
     const selectedVar = varieties.find(v => v.varietyName === auditVarietyName);
-    const targetLength = selectedVar ? selectedVar.targetLengthCm : 140;
-    const targetWidth = selectedVar ? selectedVar.targetWidthCm : 70;
+    const targetLength = selectedVar ? selectedVar.targetLengthCm : 55;
+    const targetWidth = selectedVar ? selectedVar.targetWidthCm : 28;
     const targetGsm = selectedVar ? selectedVar.standardWeightGsm : 500;
     const lengthTol = selectedVar ? (selectedVar.allowedSizingTolerancePct / 100) * targetLength : 3;
     const gsmTol = selectedVar ? (selectedVar.allowedGsmTolerancePct / 100) * targetGsm : 15;
@@ -343,9 +343,9 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                           <td className="p-3 font-semibold text-slate-900">{m.machineNo}</td>
                           <td className="p-3 text-slate-700">{m.operatorName || 'Rajesh Kumar'}</td>
                           <td className="p-3 text-center font-mono font-semibold text-slate-900">
-                            {m.avgLength.toFixed(0)}mm
+                            {m.avgLength.toFixed(1)} x {m.avgWidth.toFixed(1)} in
                           </td>
-                          <td className="p-3 text-center font-mono text-slate-500">1040mm</td>
+                          <td className="p-3 text-center font-mono text-slate-500">55 x 28 in</td>
                           <td className="p-3">
                             {isFail ? (
                               <span className="bg-red-100 text-red-700 px-2.5 py-0.5 rounded text-xs uppercase font-bold">VARIANCE ALERT</span>
@@ -451,13 +451,13 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                         <td>{a.operatorName}</td>
                         <td className="font-medium">{a.varietyName}</td>
                         <td className="num font-mono">
-                          {a.actualLengthCm} x {a.actualWidthCm} cm
+                          {a.actualLengthCm} x {a.actualWidthCm} in
                           {a.sizingStatus !== 'pass' && (
                             <span className="block text-[10px] text-rose-600 font-bold uppercase">{a.sizingStatus.replace('_', ' ')}</span>
                           )}
                         </td>
                         <td className="num font-mono">
-                          {a.actualWeightGsm} GSM
+                          {a.actualWeightGsm} grm
                         </td>
                         <td>
                           {a.overallResult === 'PASS' && <span className="pill paid">PASS</span>}
@@ -521,11 +521,11 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <span className="text-slate-400 font-mono block text-[10px]">Standard Weight</span>
-                      <span className="font-bold font-mono text-slate-800">{v.standardWeightGsm} GSM</span>
+                      <span className="font-bold font-mono text-slate-800">{v.standardWeightGsm} grm</span>
                     </div>
                     <div>
                       <span className="text-slate-400 font-mono block text-[10px]">Target Dimensions</span>
-                      <span className="font-bold font-mono text-slate-800">{v.targetLengthCm} x {v.targetWidthCm} cm</span>
+                      <span className="font-bold font-mono text-slate-800">{v.targetLengthCm} x {v.targetWidthCm} inches</span>
                     </div>
                   </div>
 
@@ -535,7 +535,7 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                       <span className="font-mono text-slate-700">±{v.allowedSizingTolerancePct}%</span>
                     </div>
                     <div>
-                      <span className="text-slate-400 font-mono block text-[10px]">GSM Tolerance</span>
+                      <span className="text-slate-400 font-mono block text-[10px]">Weight Tolerance</span>
                       <span className="font-mono text-slate-700">±{v.allowedGsmTolerancePct}%</span>
                     </div>
                   </div>
@@ -543,7 +543,7 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                   <div className="bg-slate-50 p-2 rounded border border-slate-200 text-[11px] text-slate-600 space-y-0.5">
                     <div><strong>Warp Yarn:</strong> {v.warpYarnSpec}</div>
                     <div><strong>Weft Yarn:</strong> {v.weftYarnSpec}</div>
-                    <div><strong>Terry Pile:</strong> {v.pileYarnSpec}</div>
+                    <div><strong>Terry Pick:</strong> {v.pileYarnSpec}</div>
                   </div>
                 </div>
 
@@ -700,7 +700,7 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
 
               <div className="row3">
                 <div>
-                  <label>Standard Weight (GSM)</label>
+                  <label>Standard Weight (Grams / grm)</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -710,7 +710,7 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                   />
                 </div>
                 <div>
-                  <label>Target Length (cm)</label>
+                  <label>Target Length (inches)</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -720,7 +720,7 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                   />
                 </div>
                 <div>
-                  <label>Target Width (cm)</label>
+                  <label>Target Width (inches)</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -742,7 +742,7 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                   />
                 </div>
                 <div>
-                  <label>Allowed GSM Tolerance (%)</label>
+                  <label>Allowed Weight Tolerance (%)</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -770,7 +770,7 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                   />
                 </div>
                 <div>
-                  <label>Terry Pile Yarn Spec</label>
+                  <label>Terry Pick Yarn Spec</label>
                   <input
                     type="text"
                     value={pileYarnSpec}
@@ -779,9 +779,9 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                 </div>
               </div>
 
-              <div className="flex gap-3 pt-2">
-                <button type="submit" className="btn primary full">Save Towel Variety</button>
-                <button type="button" onClick={() => setShowVarietyModal(false)} className="btn text-slate-600 border-slate-300">Cancel</button>
+              <div className="flex gap-3 pt-3 border-t border-slate-200 bg-white sticky bottom-0 z-20">
+                <button type="submit" className="btn primary full font-bold">Save Towel Variety</button>
+                <button type="button" onClick={() => setShowVarietyModal(false)} className="btn text-slate-600 border-slate-300 font-bold">Cancel</button>
               </div>
             </form>
           </section>
@@ -832,15 +832,15 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
               <div className="p-3 bg-amber-50/70 border border-amber-200 rounded text-xs space-y-1 font-mono">
                 <span className="font-bold text-amber-900 block uppercase">Target Specs for {auditVarietyName}:</span>
                 <div>
-                  Standard Length: <strong>{varieties.find(v => v.varietyName === auditVarietyName)?.targetLengthCm || 140} cm</strong> | 
-                  Standard Width: <strong>{varieties.find(v => v.varietyName === auditVarietyName)?.targetWidthCm || 70} cm</strong> | 
-                  Standard GSM: <strong>{varieties.find(v => v.varietyName === auditVarietyName)?.standardWeightGsm || 500} GSM</strong>
+                  Standard Length: <strong>{varieties.find(v => v.varietyName === auditVarietyName)?.targetLengthCm || 55} in</strong> | 
+                  Standard Width: <strong>{varieties.find(v => v.varietyName === auditVarietyName)?.targetWidthCm || 28} in</strong> | 
+                  Standard Weight: <strong>{varieties.find(v => v.varietyName === auditVarietyName)?.standardWeightGsm || 500} grm</strong>
                 </div>
               </div>
 
               <div className="row3">
                 <div>
-                  <label>Measured Length (cm) *</label>
+                  <label>Measured Length (inches) *</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -850,7 +850,7 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                   />
                 </div>
                 <div>
-                  <label>Measured Width (cm) *</label>
+                  <label>Measured Width (inches) *</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -860,7 +860,7 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                   />
                 </div>
                 <div>
-                  <label>Measured Weight (GSM) *</label>
+                  <label>Measured Weight (Grams / grm) *</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -896,7 +896,7 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                   type="text"
                   value={varianceNotes}
                   onChange={(e) => setVarianceNotes(e.target.value)}
-                  placeholder="e.g. Length is 136.5cm vs Machine 1 spec 140cm"
+                  placeholder="e.g. Length is 53.5 in vs Machine 1 spec 55 in"
                 />
               </div>
 
@@ -910,9 +910,9 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                 />
               </div>
 
-              <div className="flex gap-3 pt-2">
-                <button type="submit" className="btn primary full">Save Audit Record</button>
-                <button type="button" onClick={() => setShowAuditModal(false)} className="btn text-slate-600 border-slate-300">Cancel</button>
+              <div className="flex gap-3 pt-3 border-t border-slate-200 bg-white sticky bottom-0 z-20">
+                <button type="submit" className="btn primary full font-bold">Save Audit Record</button>
+                <button type="button" onClick={() => setShowAuditModal(false)} className="btn text-slate-600 border-slate-300 font-bold">Cancel</button>
               </div>
             </form>
           </section>
@@ -985,9 +985,9 @@ export const VarietyAndQualityTab: React.FC<VarietyAndQualityTabProps> = ({
                 </div>
               </div>
 
-              <div className="flex gap-3 pt-2">
-                <button type="submit" className="btn primary full">Schedule Task</button>
-                <button type="button" onClick={() => setShowReminderModal(false)} className="btn text-slate-600 border-slate-300">Cancel</button>
+              <div className="flex gap-3 pt-3 border-t border-slate-200 bg-white sticky bottom-0 z-20">
+                <button type="submit" className="btn primary full font-bold">Schedule Task</button>
+                <button type="button" onClick={() => setShowReminderModal(false)} className="btn text-slate-600 border-slate-300 font-bold">Cancel</button>
               </div>
             </form>
           </section>

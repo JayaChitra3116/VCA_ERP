@@ -461,7 +461,7 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
                 />
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-200">
+              <div className="flex justify-end gap-2.5 pt-3 pb-1 border-t border-slate-200 bg-white sticky bottom-0 z-20 mt-3 -mb-1">
                 <button
                   type="button"
                   onClick={() => setShowStockModal(false)}

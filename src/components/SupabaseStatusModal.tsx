@@ -1,64 +1,68 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   checkSupabaseConnection, 
   SupabaseHealthStatus, 
   EXPECTED_TABLES, 
   getSupabaseCredentials, 
-  saveSupabaseCredentials 
+  saveSupabaseCredentials,
+  COMPLETE_SUPABASE_SCHEMA_SQL,
+  RESET_AND_RECREATE_SECURE_SCHEMA_SQL,
+  DISABLE_ALL_RLS_SQL
 } from '../lib/supabase';
-import { forceSyncAllDataToCloud, cleanDatabaseDuplicatesInSupabase } from '../lib/storage';
-import { Database, CheckCircle2, AlertCircle, RefreshCw, Server, Key, Save, Link2, Copy, FileText, UploadCloud, Trash2 } from 'lucide-react';
+import { 
+  forceSyncAllDataToCloud, 
+  cleanDatabaseDuplicatesInSupabase,
+  runDatabaseSanityCheck,
+  forceSyncAllDataToRelationalTables,
+  DatabaseSanityReport
+} from '../lib/storage';
+import { 
+  Database, 
+  CheckCircle2, 
+  AlertCircle, 
+  RefreshCw, 
+  Server, 
+  Key, 
+  Save, 
+  Link2, 
+  Copy, 
+  FileText, 
+  UploadCloud, 
+  Trash2,
+  ShieldCheck,
+  Layers,
+  ArrowUpRight,
+  Sparkles,
+  Lock
+} from 'lucide-react';
 
 interface SupabaseStatusModalProps {
   onClose: () => void;
   onRefreshData?: () => Promise<void>;
 }
 
-const SQL_FIX_SCRIPT = `-- Supabase SQL Permissions & Deduplication Script
--- Copy & paste into Supabase Dashboard -> SQL Editor -> Click RUN
-
--- 1. Grant Permissions / RLS Policies
-CREATE POLICY "Allow public read-write on app_state" ON public.app_state FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write on customers" ON public.customers FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write on sales_bills" ON public.sales_bills FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write on suppliers" ON public.suppliers FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public read-write on inventory" ON public.inventory FOR ALL USING (true) WITH CHECK (true);
-
--- Or Disable RLS if preferred
-ALTER TABLE IF EXISTS public.app_state DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.customers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.sales_bills DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.suppliers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS public.inventory DISABLE ROW LEVEL SECURITY;
-
--- 2. DEDUPLICATE CUSTOMERS (Keeps 1 copy per customer name)
-DELETE FROM public.customers a
-USING public.customers b
-WHERE a.ctid < b.ctid
-  AND a.company_id = b.company_id
-  AND LOWER(TRIM(a.name)) = LOWER(TRIM(b.name));
-
--- 3. DEDUPLICATE SALES BILLS (Keeps 1 copy per bill_no)
-DELETE FROM public.sales_bills a
-USING public.sales_bills b
-WHERE a.ctid < b.ctid
-  AND a.company_id = b.company_id
-  AND LOWER(TRIM(a.bill_no)) = LOWER(TRIM(b.bill_no));
-
--- 4. Schema Column Fixes
-ALTER TABLE IF EXISTS public.customers ADD COLUMN IF NOT EXISTS address TEXT;
-ALTER TABLE IF EXISTS public.customers ADD COLUMN IF NOT EXISTS place TEXT;
-ALTER TABLE IF EXISTS public.sales_bills ADD COLUMN IF NOT EXISTS customer_address TEXT;
-ALTER TABLE IF EXISTS public.sales_bills ADD COLUMN IF NOT EXISTS customer_phone TEXT;
-`;
-
 export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClose, onRefreshData }) => {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<SupabaseHealthStatus | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [copiedResetSql, setCopiedResetSql] = useState(false);
+  const [copiedDisableRlsSql, setCopiedDisableRlsSql] = useState(false);
+  const [activeTab, setActiveTab] = useState<'reset' | 'disable_rls' | 'update'>('reset');
+  const [showSqlPreview, setShowSqlPreview] = useState(false);
   const [syncingLocal, setSyncingLocal] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [cleaningDuplicates, setCleaningDuplicates] = useState(false);
+
+  // Sanity check state
+  const [sanityReport, setSanityReport] = useState<DatabaseSanityReport | null>(null);
+  const [runningSanity, setRunningSanity] = useState(false);
+  const [pushingRelational, setPushingRelational] = useState(false);
+  const [relationalSyncReport, setRelationalSyncReport] = useState<{
+    successCount: number;
+    totalKeys: number;
+    results: { key: string; table: string; count: number; success: boolean; error?: string }[];
+  } | null>(null);
 
   const initialCreds = getSupabaseCredentials();
   const [urlInput, setUrlInput] = useState(initialCreds.url || 'https://lfmjmhcqrpsjtnubaxym.supabase.co');
@@ -71,7 +75,38 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
     setLoading(false);
   };
 
-  const [cleaningDuplicates, setCleaningDuplicates] = useState(false);
+  const handleRunSanityCheck = async () => {
+    setRunningSanity(true);
+    try {
+      const report = await runDatabaseSanityCheck();
+      setSanityReport(report);
+    } catch (e: any) {
+      console.error(e);
+    } finally {
+      setRunningSanity(false);
+    }
+  };
+
+  const handlePushAllToRelational = async () => {
+    setPushingRelational(true);
+    setSyncMsg('Pushing all local & memory data directly to Supabase Relational Tables...');
+    try {
+      const result = await forceSyncAllDataToRelationalTables();
+      setRelationalSyncReport(result);
+      setSyncMsg(`✅ Synced ${result.successCount} of ${result.totalKeys} entities to Supabase Relational Tables!`);
+      // Re-run sanity check to reflect updated row counts
+      const updatedSanity = await runDatabaseSanityCheck();
+      setSanityReport(updatedSanity);
+      if (onRefreshData) {
+        await onRefreshData();
+      }
+    } catch (e: any) {
+      setSyncMsg(`Sync error: ${e?.message || 'Failed'}`);
+    } finally {
+      setPushingRelational(false);
+      setTimeout(() => setSyncMsg(null), 5000);
+    }
+  };
 
   const handleForceSyncLocalData = async () => {
     setSyncingLocal(true);
@@ -86,6 +121,8 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
       if (onRefreshData) {
         await onRefreshData();
       }
+      // Re-run sanity check
+      handleRunSanityCheck();
     } catch (e: any) {
       setSyncMsg(`Sync error: ${e?.message || 'Failed'}`);
     } finally {
@@ -111,10 +148,40 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
     }
   };
 
+  const copyText = async (text: string, setCopied: (val: boolean) => void) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        throw new Error('Clipboard API unavailable');
+      }
+    } catch {
+      // Fallback method
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-999999px';
+      ta.style.top = '-999999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 3000);
+  };
+
   const handleCopySql = () => {
-    navigator.clipboard.writeText(SQL_FIX_SCRIPT);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 3000);
+    copyText(COMPLETE_SUPABASE_SCHEMA_SQL, setCopiedSql);
+  };
+
+  const handleCopyResetSql = () => {
+    copyText(RESET_AND_RECREATE_SECURE_SCHEMA_SQL, setCopiedResetSql);
+  };
+
+  const handleCopyDisableRlsSql = () => {
+    copyText(DISABLE_ALL_RLS_SQL, setCopiedDisableRlsSql);
   };
 
   const handleSaveCredentials = async (e: React.FormEvent) => {
@@ -123,21 +190,23 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 2500);
     await handleTestConnection();
+    await handleRunSanityCheck();
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     handleTestConnection();
+    handleRunSanityCheck();
   }, []);
 
   return (
     <div className="modal-backdrop">
-      <section className="modal max-w-2xl" role="dialog" aria-modal="true">
-        <div className="modal-head">
-          <h2 className="flex items-center gap-2">
+      <section className="modal max-w-3xl max-h-[90vh] flex flex-col" role="dialog" aria-modal="true">
+        <div className="modal-head border-b border-slate-200 pb-3">
+          <h2 className="flex items-center gap-2 text-base font-bold text-slate-800">
             <Database className="w-5 h-5 text-indigo-700" />
-            <span>Supabase Database Credentials & Connection Setup</span>
+            <span>Supabase Relational Database &amp; Cloud Sync Center</span>
           </h2>
-          <button className="close-btn" aria-label="Close" onClick={onClose}>×</button>
+          <button className="close-btn text-2xl leading-none text-slate-500 hover:text-slate-800 cursor-pointer" aria-label="Close" onClick={onClose}>×</button>
         </div>
 
         <div className="space-y-4 text-xs font-sans overflow-y-auto flex-1 p-4">
@@ -150,7 +219,7 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
               </span>
               {saveSuccess && (
                 <span className="text-emerald-700 font-bold text-xs flex items-center gap-1 bg-emerald-100 px-2 py-0.5 rounded">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Saved & Configured!
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Saved &amp; Configured!
                 </span>
               )}
             </div>
@@ -198,77 +267,245 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
             </div>
           </form>
 
-          {/* Status Box */}
-          <div className="p-4 rounded border bg-slate-50 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-slate-500 uppercase font-bold text-[10px]">Database Status Check</span>
-              <button
-                type="button"
-                onClick={handleTestConnection}
-                disabled={loading}
-                className="btn text-[11px] py-1 px-3 flex items-center gap-1 border-slate-300 cursor-pointer"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-                <span>Re-Test Connection</span>
-              </button>
+          {/* Database Sanity Check & Relational Tables Report */}
+          <div className="p-4 rounded-lg border border-slate-200 bg-slate-50 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-indigo-600" />
+                <div>
+                  <h3 className="font-mono font-bold text-xs text-slate-900 uppercase">
+                    Relational Tables Sanity Check ({sanityReport ? `${sanityReport.healthyCount}/${sanityReport.totalTables} Healthy` : 'Checking...'})
+                  </h3>
+                  <p className="text-[11px] text-slate-600">
+                    Real-time verification of all 16 database tables, permissions, and row counts in Supabase.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRunSanityCheck}
+                  disabled={runningSanity}
+                  className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-mono text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${runningSanity ? 'animate-spin' : ''}`} />
+                  <span>{runningSanity ? 'Checking...' : 'Run Sanity Check'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePushAllToRelational}
+                  disabled={pushingRelational || !status?.connected}
+                  className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-mono text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
+                >
+                  <ArrowUpRight className={`w-3.5 h-3.5 ${pushingRelational ? 'animate-bounce' : ''}`} />
+                  <span>{pushingRelational ? 'Pushing...' : 'Sync All To Relational Tables'}</span>
+                </button>
+              </div>
             </div>
 
-            {loading ? (
-              <div className="text-slate-600 font-mono animate-pulse py-2">
-                Testing Supabase URL, API Key & Table Schemas...
+            {/* Sanity Report Table List */}
+            {sanityReport && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
+                {sanityReport.tables.map((t) => {
+                  const isOk = t.status === 'healthy';
+                  return (
+                    <div
+                      key={t.tableName}
+                      className={`p-2.5 rounded-md border text-xs font-mono flex items-start justify-between gap-2 transition-all ${
+                        isOk
+                          ? 'bg-white border-emerald-300 text-slate-800'
+                          : t.status === 'missing'
+                          ? 'bg-rose-50 border-rose-300 text-rose-900'
+                          : 'bg-amber-50 border-amber-300 text-amber-900'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 font-bold">
+                          {isOk ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                          )}
+                          <span className="truncate">{t.tableName}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-0.5 truncate">
+                          {t.message}
+                        </p>
+                      </div>
+                      <div className="flex-shrink-0 text-right">
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          isOk ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                        }`}>
+                          {t.rowCount} rows
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ) : status ? (
-              <div className="space-y-2">
+            )}
+
+            {/* Actionable Standardized Schema & RLS SQL Scripts */}
+            <div className="p-4 bg-slate-900 text-slate-100 rounded-lg space-y-3 border border-slate-800">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
                 <div className="flex items-center gap-2">
-                  {status.connected ? (
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-                  ) : (
-                    <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />
-                  )}
-                  <span className={`font-bold font-mono text-sm ${status.connected ? 'text-emerald-800' : 'text-rose-800'}`}>
-                    {status.connected ? 'SUPABASE CONNECTED' : 'NOT CONNECTED TO SUPABASE'}
+                  <Lock className="w-4 h-4 text-indigo-400" />
+                  <span className="font-mono font-bold text-xs text-white">
+                    Database Schema &amp; Security SQL Generator
                   </span>
                 </div>
+                <div className="flex flex-wrap items-center gap-1 bg-slate-800 p-1 rounded-md">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('reset')}
+                    className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold transition-colors cursor-pointer ${
+                      activeTab === 'reset' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    1. Clean Reset &amp; Secure RLS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('disable_rls')}
+                    className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold transition-colors cursor-pointer ${
+                      activeTab === 'disable_rls' ? 'bg-amber-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    2. Quick Fix (Disable RLS)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('update')}
+                    className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold transition-colors cursor-pointer ${
+                      activeTab === 'update' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    3. Patch Schema
+                  </button>
+                </div>
+              </div>
 
-                <p className="text-slate-700 font-mono bg-white p-2.5 rounded border border-slate-200">
-                  {status.message}
-                </p>
-
-                {(status.permissionError || status.missingTables.length > 0) && (
-                  <div className="p-3 bg-amber-50 border border-amber-300 rounded-lg space-y-2 text-amber-900">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono font-bold text-[11px] flex items-center gap-1.5">
-                        <FileText className="w-4 h-4 text-amber-700" />
-                        <span>Fix Permissions &amp; Schema SQL Script</span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleCopySql}
-                        className="bg-amber-700 hover:bg-amber-800 text-white font-mono font-bold text-[11px] px-3 py-1 rounded flex items-center gap-1 shadow-xs cursor-pointer"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>{copiedSql ? 'Copied to Clipboard!' : 'Copy SQL Fix Script'}</span>
-                      </button>
-                    </div>
-                    <p className="text-[11px] font-sans text-amber-800">
-                      Open your <strong>Supabase Dashboard &gt; SQL Editor</strong>, paste this script, and click <strong>RUN</strong> to grant table access permissions and allow instant data insertions.
+              {activeTab === 'reset' && (
+                <div className="space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      <strong>Option 1 (Full Security):</strong> Drops old tables cleanly (CASCADE) and creates all 16 standardized tables with normalized data types, indexes, and full <strong>Row-Level Security (RLS)</strong> policies.
                     </p>
+                    <button
+                      type="button"
+                      onClick={handleCopyResetSql}
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white font-mono font-bold text-xs px-3.5 py-2 rounded flex items-center justify-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>{copiedResetSql ? 'Copied Reset Script!' : 'Copy Clean Reset Script'}</span>
+                    </button>
+                  </div>
+                  <div className="p-2.5 bg-slate-950 rounded border border-slate-800 text-[11px] font-mono text-emerald-400 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 flex-shrink-0 text-amber-400" />
+                    <span>Safe to run: your app data is safely preserved in browser and will auto-repopulate after running this!</span>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'disable_rls' && (
+                <div className="space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      <strong>Option 2 (Instant Permissive Access):</strong> Disables Row-Level Security on all existing tables so your insertions and queries are never blocked by permissions.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleCopyDisableRlsSql}
+                      className="bg-amber-600 hover:bg-amber-500 text-white font-mono font-bold text-xs px-3.5 py-2 rounded flex items-center justify-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>{copiedDisableRlsSql ? 'Copied Permissive Script!' : 'Copy Disable RLS Script'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'update' && (
+                <div className="space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      <strong>Option 3 (In-Place Patch):</strong> Creates missing tables and applies Row-Level Security (RLS) policies without dropping existing tables.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleCopySql}
+                      className="bg-slate-700 hover:bg-slate-600 text-white font-mono font-bold text-xs px-3.5 py-2 rounded flex items-center justify-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>{copiedSql ? 'Copied to Clipboard!' : 'Copy Patch Script'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* View/Hide SQL Script toggle */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowSqlPreview(!showSqlPreview)}
+                  className="text-[11px] text-indigo-400 hover:text-indigo-300 font-mono underline cursor-pointer"
+                >
+                  {showSqlPreview ? '▼ Hide SQL Script' : '▶ Click to View / Manually Copy SQL Script Text'}
+                </button>
+                {showSqlPreview && (
+                  <div className="mt-2 space-y-1">
+                    <textarea
+                      readOnly
+                      rows={8}
+                      className="w-full bg-black/80 text-emerald-300 font-mono text-[10px] p-2.5 rounded border border-slate-700 select-all"
+                      value={
+                        activeTab === 'reset' 
+                          ? RESET_AND_RECREATE_SECURE_SCHEMA_SQL 
+                          : activeTab === 'disable_rls'
+                          ? DISABLE_ALL_RLS_SQL
+                          : COMPLETE_SUPABASE_SCHEMA_SQL
+                      }
+                      onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+                    />
+                    <p className="text-[10px] text-slate-400 italic">Tip: Click inside the box above to select all text, then press Ctrl+C.</p>
                   </div>
                 )}
               </div>
-            ) : null}
+
+              <div className="text-[11px] text-slate-300 bg-slate-950/90 p-3 rounded border border-slate-800 space-y-1.5">
+                <div className="font-bold text-white flex items-center gap-1.5">
+                  <span>How to Apply in 3 Steps:</span>
+                </div>
+                <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-300">
+                  <li>Click <strong>Copy Script</strong> (or select text in the box above).</li>
+                  <li>
+                    Open your{' '}
+                    <a
+                      href={urlInput ? `${urlInput.replace('.supabase.co', '')}.supabase.co` : 'https://supabase.com/dashboard'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-indigo-400 hover:text-indigo-300 font-bold underline inline-flex items-center gap-0.5"
+                    >
+                      Supabase Dashboard &gt; SQL Editor <ArrowUpRight className="w-3 h-3 inline" />
+                    </a>
+                    , paste the script into a new query, and click <strong>RUN</strong>.
+                  </li>
+                  <li>Return here and click <strong>"Sync All To Relational Tables"</strong> above.</li>
+                </ol>
+              </div>
+            </div>
           </div>
 
-          {/* Manual Local Storage Upload & Cloud Sync Section */}
+          {/* Sync & Maintenance Tools */}
           <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50/60 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h4 className="font-mono text-emerald-950 font-bold text-xs flex items-center gap-1.5">
                   <UploadCloud className="w-4 h-4 text-emerald-700" />
-                  <span>Sync Local Data (Computer A / Computer B)</span>
+                  <span>Cross-Device Cloud Sync &amp; Maintenance</span>
                 </h4>
                 <p className="text-[11px] text-emerald-800 font-sans mt-0.5">
-                  If this computer has offline local storage data, click below to merge and upload all local bills, stock, and records into Supabase Cloud!
+                  Upload local offline storage to Supabase or clean duplicate rows in relational tables.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -288,7 +525,7 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
                   className="bg-rose-700 hover:bg-rose-800 disabled:opacity-50 text-white font-mono font-bold text-xs px-3.5 py-2 rounded flex items-center justify-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap transition-colors"
                 >
                   <Trash2 className={`w-4 h-4 ${cleaningDuplicates ? 'animate-spin' : ''}`} />
-                  <span>{cleaningDuplicates ? 'Purging Duplicates...' : 'Purge Duplicates in Supabase'}</span>
+                  <span>{cleaningDuplicates ? 'Purging...' : 'Purge Duplicates'}</span>
                 </button>
               </div>
             </div>
@@ -299,45 +536,12 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ onClos
             )}
           </div>
 
-          {/* Table Alignment Checklist */}
-          <div>
-            <h3 className="font-mono text-xs font-bold uppercase text-slate-700 mb-2 flex items-center gap-1.5">
-              <Server className="w-4 h-4 text-indigo-600" />
-              <span>Verified Supabase Tables ({EXPECTED_TABLES.length} Required)</span>
-            </h3>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {EXPECTED_TABLES.map((table) => {
-                const isMissing = status?.missingTables.includes(table);
-                return (
-                  <div
-                    key={table}
-                    className={`p-2 rounded border text-xs font-mono flex items-center gap-1.5 ${
-                      !status?.connected
-                        ? 'bg-slate-100 border-slate-200 text-slate-500'
-                        : isMissing
-                        ? 'bg-rose-50 border-rose-300 text-rose-800'
-                        : 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                    }`}
-                  >
-                    {status?.connected && !isMissing ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
-                    ) : (
-                      <AlertCircle className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                    )}
-                    <span className="truncate">{table}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-2">
+          <div className="flex justify-end pt-2 border-t border-slate-200">
             <button
               onClick={onClose}
-              className="btn primary cursor-pointer"
+              className="bg-slate-800 hover:bg-slate-900 text-white font-mono text-xs font-bold px-5 py-2 rounded shadow-xs cursor-pointer"
             >
-              Done
+              Close
             </button>
           </div>
         </div>

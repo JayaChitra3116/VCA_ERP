@@ -32,6 +32,16 @@ interface PurchaseTabProps {
   setPbPoNo: React.Dispatch<React.SetStateAction<string>>;
 }
 
+function formatDateDDMMYYYY(dateStr?: string): string {
+  if (!dateStr) return '—';
+  if (dateStr.includes('/')) return dateStr;
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  return dateStr;
+}
+
 export const PurchaseTab: React.FC<PurchaseTabProps> = ({
   purchaseBills,
   setPurchaseBills,
@@ -409,14 +419,16 @@ export const PurchaseTab: React.FC<PurchaseTabProps> = ({
             <thead className="bg-slate-50 text-slate-700 uppercase font-bold border-b border-slate-200 text-[11px]">
               <tr>
                 <th className="p-2 w-10 text-center">#</th>
-                <th className="p-2 min-w-[180px]">Material / Yarn Item Description</th>
+                <th className="p-2 min-w-[170px]">Material / Yarn Item Description</th>
                 <th className="p-2 w-20 text-center">HSN</th>
                 <th className="p-2 w-20 text-right">Qty</th>
                 <th className="p-2 w-20 text-center">Unit</th>
                 <th className="p-2 w-24 text-right">Rate (₹)</th>
                 <th className="p-2 w-20 text-center">GST %</th>
                 <th className="p-2 w-20 text-center">Disc %</th>
-                <th className="p-2 w-28 text-right">Taxable (₹)</th>
+                <th className="p-2 w-24 text-right">Taxable (₹)</th>
+                <th className="p-2 w-24 text-right">GST Amt (₹)</th>
+                <th className="p-2 w-28 text-right">Net Line (₹)</th>
                 <th className="p-2 w-10 text-center"></th>
               </tr>
             </thead>
@@ -425,6 +437,8 @@ export const PurchaseTab: React.FC<PurchaseTabProps> = ({
                 const rawVal = (Number(item.qty) || 0) * (Number(item.rate) || 0);
                 const discAmt = (rawVal * (Number(item.discPct) || 0)) / 100;
                 const lineTaxable = rawVal - discAmt;
+                const lineGstAmt = (lineTaxable * (Number(item.taxRate) || 0)) / 100;
+                const lineTotal = lineTaxable + lineGstAmt;
 
                 return (
                   <tr key={idx} className="hover:bg-slate-50/50">
@@ -483,7 +497,7 @@ export const PurchaseTab: React.FC<PurchaseTabProps> = ({
                       <select
                         value={item.taxRate}
                         onChange={(e) => handleItemChange(idx, 'taxRate', parseFloat(e.target.value) || 0)}
-                        className="w-full p-1.5 border border-slate-300 rounded text-xs text-center"
+                        className="w-full p-1.5 border border-slate-300 rounded text-xs text-center font-bold font-mono"
                       >
                         <option value={5}>5%</option>
                         <option value={12}>12%</option>
@@ -501,8 +515,14 @@ export const PurchaseTab: React.FC<PurchaseTabProps> = ({
                         className="w-full p-1.5 border border-slate-300 rounded text-center text-xs font-mono"
                       />
                     </td>
-                    <td className="p-2 text-right font-bold font-mono text-slate-900">
+                    <td className="p-2 text-right font-mono font-bold text-slate-700">
                       ₹{lineTaxable.toFixed(2)}
+                    </td>
+                    <td className="p-2 text-right font-mono font-bold text-purple-700">
+                      ₹{lineGstAmt.toFixed(2)}
+                    </td>
+                    <td className="p-2 text-right font-mono font-extrabold text-slate-900">
+                      ₹{lineTotal.toFixed(2)}
                     </td>
                     <td className="p-2 text-center">
                       <button
@@ -605,37 +625,66 @@ export const PurchaseTab: React.FC<PurchaseTabProps> = ({
                   </td>
                 </tr>
               ) : (
-                purchaseBills.map((b, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50">
-                    <td className="p-2.5 font-mono font-bold text-purple-700">{b.poNo}</td>
-                    <td className="p-2.5 font-mono text-slate-600">{b.supplierInvNo || '—'}</td>
-                    <td className="p-2.5 text-slate-600">{b.date}</td>
-                    <td className="p-2.5 font-bold text-slate-900">{b.supplierName}</td>
-                    <td className="p-2.5 text-right font-mono font-bold text-slate-900">₹{b.grand.toLocaleString('en-IN')}</td>
-                    <td className="p-2.5 text-center">
-                      <span className={`pill ${b.status}`}>{b.status}</span>
-                    </td>
-                    <td className="p-2.5 text-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <button
-                          onClick={() => openInvoice(b.poNo, 'purchase')}
-                          className="px-2.5 py-1 rounded bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold border border-purple-200 flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Print / Preview</span>
-                        </button>
+                purchaseBills.map((b, idx) => {
+                  const billTime = b.date ? new Date(b.date).getTime() : 0;
+                  const daysAgo = billTime ? Math.floor((new Date().getTime() - billTime) / (1000 * 3600 * 24)) : 0;
+                  const isOverdue = b.status === 'unpaid' && daysAgo >= 30;
 
+                  return (
+                    <tr key={idx} className={`hover:bg-slate-50 ${isOverdue ? 'bg-amber-50/40' : ''}`}>
+                      <td className="p-2.5 font-mono font-bold text-purple-700">
+                        {b.poNo}
+                        {isOverdue && (
+                          <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-900 font-sans font-extrabold text-[10px] rounded border border-amber-300">
+                            30d+ Overdue
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-2.5 font-mono text-slate-600">{b.supplierInvNo || '—'}</td>
+                      <td className="p-2.5 font-mono text-slate-700">{formatDateDDMMYYYY(b.date)}</td>
+                      <td className="p-2.5 font-bold text-slate-900">{b.supplierName}</td>
+                      <td className="p-2.5 text-right font-mono font-bold text-slate-900">₹{b.grand.toLocaleString('en-IN')}</td>
+                      <td className="p-2.5 text-center">
                         <button
-                          onClick={() => handleDeletePurchaseBill(b)}
-                          className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded border border-rose-200 transition-colors cursor-pointer"
-                          title="Delete Purchase Bill"
+                          onClick={async () => {
+                            const newStatus = b.status === 'paid' ? 'unpaid' : 'paid';
+                            const updated = purchaseBills.map((pb) => pb.id === b.id ? { ...pb, status: newStatus as 'paid' | 'unpaid' } : pb);
+                            setPurchaseBills(updated);
+                            await storeSet('purchaseBills', updated);
+                            showToast(`Purchase bill ${b.poNo} status updated to ${newStatus.toUpperCase()}`);
+                          }}
+                          className={`px-2.5 py-1 rounded-full font-bold text-[11px] uppercase tracking-wider transition-all cursor-pointer border ${
+                            b.status === 'paid'
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200'
+                              : 'bg-rose-100 text-rose-800 border-rose-300 hover:bg-rose-200'
+                          }`}
+                          title="Click to toggle Paid / Unpaid status"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          {b.status === 'paid' ? '✓ Paid' : '⏳ Unpaid'}
                         </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="p-2.5 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => openInvoice(b.poNo, 'purchase')}
+                            className="px-2.5 py-1 rounded bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold border border-purple-200 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Print / Preview</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleDeletePurchaseBill(b)}
+                            className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded border border-rose-200 transition-colors cursor-pointer"
+                            title="Delete Purchase Bill"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -725,7 +774,7 @@ export const PurchaseTab: React.FC<PurchaseTabProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-200">
+              <div className="flex justify-end gap-2.5 pt-3 pb-1 border-t border-slate-200 bg-white sticky bottom-0 z-20 mt-3 -mb-1">
                 <button
                   type="button"
                   onClick={() => setShowAddSupplierModal(false)}
